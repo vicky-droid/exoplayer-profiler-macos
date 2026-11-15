@@ -1,0 +1,32 @@
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local secrets
+/.venv/
+/venv/
+/ENV/
+/env
+.env
+.env.*
+
+# Local runtime data and logs
+/uploads/
+*.log
+
+# IDE and operating system files
+.idea/
+.vscode/
+.DS_Store
+
+# Packaged application/build output
+/build/
+/dist/
+*.dmg
+*.app/
+
+# Editor backup copies
+*.bak*

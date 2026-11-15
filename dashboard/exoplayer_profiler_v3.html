@@ -1,0 +1,2543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>exoplayer_profiler_v3</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+<link rel="icon" type="image/png" href="/favicon.png" />
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0d1117; --panel:#161b22; --line:#21262d; --line2:#30363d;
+  --text:#e6edf3; --muted:#8b949e; --faint:#484f58; --accent:#58a6ff;
+  --red:#da3633; --amber:#d29922; --green:#3fb950; --purple:#8957e5; --pink:#bc4c8f;
+}
+html,body{background:var(--bg);color:var(--text);font-family:'SF Pro Display','Segoe UI',-apple-system,sans-serif;height:100%}
+#app{max-width:1400px;margin:0 auto;padding:16px 18px 40px;display:flex;flex-direction:column;gap:12px}
+
+/* ── header ── */
+#header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+#header .ttl{font-size:1.05rem;font-weight:700;letter-spacing:-0.01em}
+#header .ttl small{font-weight:400;color:var(--muted);font-size:0.75rem}
+#meta{font-size:0.72rem;color:var(--muted);margin-top:3px;letter-spacing:0.02em}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+button{background:#21262d;color:var(--text);border:1px solid var(--line2);border-radius:8px;padding:6px 12px;font-size:0.75rem;cursor:pointer;transition:background .15s}
+button:hover{background:#2d333b}
+button.primary{background:#1f6feb;border-color:#1f6feb}
+button.primary:hover{background:#388bfd}
+button.danger{background:#21262d;color:#f78166}
+button.on{background:#2d333b;border-color:var(--accent);color:var(--accent)}
+
+/* ── KPI cards ── */
+#kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.kpi .v{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;line-height:1.1}
+.kpi .l{font-size:0.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-top:4px}
+.kpi .s{font-size:0.66rem;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;display:block}
+.kpi.warn .v{color:var(--amber)} .kpi.good .v{color:var(--green)} .kpi.bad .v{color:#f78166} .kpi.acc .v{color:var(--accent)}
+
+/* ── toolbar ── */
+#toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+#search{flex:1;min-width:200px;background:#0d1117;border:1px solid var(--line2);border-radius:8px;color:var(--text);padding:7px 12px;font-size:0.78rem;outline:none}
+#search:focus{border-color:var(--accent)}
+#search::placeholder{color:var(--faint)}
+#searchCount{font-size:0.68rem;color:var(--muted);white-space:nowrap}
+#chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{font-size:0.66rem;padding:3px 9px;border-radius:20px;border:1px solid var(--line2);cursor:pointer;user-select:none;color:var(--muted);background:#0d1117}
+.chip .n{opacity:.6;font-size:0.58rem}
+.chip.hidden{opacity:.35;text-decoration:line-through}
+.chip:hover{border-color:var(--accent)}
+#playBtn{min-width:64px}
+
+/* ── panels ── */
+#stack{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.panel{display:flex;position:relative}
+.plabel{flex:0 0 104px;font-size:0.62rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;padding:6px 8px 6px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px;border-right:1px solid var(--line);background:#131a24;position:sticky;left:0;z-index:3;user-select:none}
+.plabel .sub{font-size:0.55rem;color:var(--faint);font-weight:500;letter-spacing:0.03em}
+.pwrap{flex:1;position:relative;min-width:0}
+.pwrap canvas{display:block;width:100%;cursor:crosshair}
+.scrollwrap{flex:1;overflow-y:auto;max-height:52vh;min-width:0;position:relative}
+.scrollwrap canvas{display:block;width:100%}
+#minimapWrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
+#minimap{width:100%;display:block;cursor:grab}
+
+/* ── status ── */
+#status{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:0.7rem;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-variant-numeric:tabular-nums}
+#status .r{display:flex;gap:14px;flex-wrap:wrap}
+#status .zoomBtns{display:flex;gap:5px}
+#status .zoomBtns button{padding:2px 9px;font-size:0.68rem;background:var(--panel2);border:1px solid var(--line2);border-radius:6px;cursor:pointer;color:var(--muted)}
+#status .zoomBtns button:hover{background:var(--line);color:var(--text)}
+
+/* ── drawer ── */
+#drawer{position:fixed;top:0;right:0;bottom:0;width:min(360px,92vw);background:#11161f;border-left:1px solid var(--line2);transform:translateX(105%);transition:transform .2s ease;z-index:50;display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(0,0,0,.5)}
+#drawer.open{transform:none}
+#drawerHead{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px}
+#drawerHead .t{font-size:0.85rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#drawerClose{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;padding:2px 8px}
+#drawerBody{overflow-y:auto;padding:12px 14px;font-size:0.74rem;line-height:1.55}
+.dw h4{font-size:0.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin:14px 0 6px;border-bottom:1px solid var(--line);padding-bottom:3px}
+.dw .kv{display:flex;gap:8px;margin-bottom:3px}
+.dw .kv b{color:var(--accent);font-weight:600;min-width:110px;flex-shrink:0}
+.dw .kv b::after{content:'';flex:1;border-bottom:1px dotted #2a3240;margin:0 2px 3px 4px}
+.dw .kv span{word-break:break-word;color:var(--text)}
+.dw .note{background:#1a2332;border:1px solid #2b3a55;border-radius:8px;padding:8px 10px;color:#b1bac4;margin-top:6px;font-size:0.72rem}
+.dw .note.good{border-color:#1f3d2e;background:#12241b;color:#7ee787}
+.dw .note.bad{border-color:#4d221f;background:#2a1513;color:#ffa198}
+.dw .note.warn{border-color:#4d3a15;background:#2a2412;color:#e3b341}
+.dw .loadRow{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed #1c222c;font-size:0.68rem}
+.dw .loadRow b{font-weight:500;color:var(--muted)}
+
+/* ── diagnosis ── */
+#diagnosis{display:flex;flex-direction:column;gap:6px}
+.dg{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer;transition:border-color .15s}
+.dg:hover{border-color:var(--accent)}
+.dg .sev{font-size:0.6rem;font-weight:700;padding:2px 8px;border-radius:10px;flex-shrink:0;margin-top:1px;letter-spacing:0.04em}
+.dg.info .sev{background:#1f3a5f;color:#79c0ff}
+.dg.warn .sev{background:#4d3a15;color:#e3b341}
+.dg.crit .sev{background:#4d221f;color:#ffa198}
+.dg .t{font-size:0.78rem;font-weight:600}
+.dg .d{font-size:0.7rem;color:var(--muted);margin-top:2px}
+.dg .jump{margin-left:auto;font-size:0.65rem;color:var(--accent);flex-shrink:0;align-self:center}
+#diagHead{display:flex;justify-content:space-between;align-items:center;font-size:0.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.07em;padding:2px 2px 0}
+#diagHead b{color:var(--text);font-weight:700}
+.dg code{color:#79c0ff;font-size:0.68rem}
+
+/* ── device report ── */
+details#deviceRep{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+details#deviceRep summary{font-size:0.72rem;color:var(--muted);cursor:pointer;font-weight:600;letter-spacing:0.05em;text-transform:uppercase}
+#deviceBody{font-size:0.7rem;margin-top:8px;color:var(--muted)}
+#deviceBody table{width:100%;border-collapse:collapse;font-size:0.68rem}
+#deviceBody td{padding:3px 8px;border-bottom:1px solid #171d26;color:#c9d1d9;white-space:nowrap}
+#deviceBody td:first-child{color:var(--accent);font-weight:600}
+#deviceBody .dev-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+#deviceBody .dev-row b{color:var(--text)}
+
+/* ── spec modal ── */
+#specModal{position:fixed;inset:0;background:rgba(5,8,12,.8);z-index:70;display:none;align-items:center;justify-content:center;padding:20px}
+#specModal.open{display:flex}
+#specBox{background:#0d1117;border:1px solid var(--line2);border-radius:12px;width:min(900px,96vw);height:min(760px,90vh);display:flex;flex-direction:column;overflow:hidden}
+#specHead{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+#specText{flex:1;overflow:auto;padding:14px 18px;font-family:'SF Mono',ui-monospace,monospace;font-size:0.68rem;line-height:1.6;color:#b1bac4;white-space:pre-wrap;word-break:break-word}
+#specText b{color:var(--text)}
+#specText .secc{color:var(--accent);font-weight:700}
+
+/* ── table modal ── */
+#modal{position:fixed;inset:0;background:rgba(5,8,12,.75);z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
+#modal.open{display:flex}
+#tableBox{background:#11161f;border:1px solid var(--line2);border-radius:12px;width:min(1100px,96vw);height:min(700px,88vh);display:flex;flex-direction:column;overflow:hidden}
+#tableHead{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+#tableWrap{overflow:auto;flex:1}
+table{width:100%;border-collapse:collapse;font-size:0.72rem;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;background:#1a2230;color:var(--muted);text-align:left;padding:6px 10px;font-size:0.64rem;text-transform:uppercase;letter-spacing:0.05em;cursor:pointer;user-select:none;border-bottom:1px solid var(--line)}
+th:hover{color:var(--text)}
+td{padding:4px 10px;border-bottom:1px solid #171d26;color:#c9d1d9;white-space:nowrap;max-width:340px;overflow:hidden;text-overflow:ellipsis}
+tr{cursor:pointer}
+tr:hover td{background:#1a2230}
+td.time{color:var(--faint)} td.cat{font-weight:600} td.evt{color:var(--accent)} td.det{color:var(--faint);white-space:pre-wrap;word-break:break-all;max-width:420px}
+.td-cat-0{color:#6e7681}.td-cat-1{color:#79c0ff}.td-cat-2{color:#58a6ff}.td-cat-3{color:#d29922}.td-cat-4{color:#f78166}.td-cat-5{color:#d2a8ff}.td-cat-6{color:#56d364}.td-cat-7{color:#d2a8ff}.td-cat-8{color:#3fb950}.td-cat-9{color:#d29922}.td-cat-10{color:#e3b341}.td-cat-11{color:#58a6ff}.td-cat-12{color:#3fb950}
+
+/* ── drop zone / tooltip ── */
+#dropzone{position:fixed;inset:0;background:var(--bg);z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;transition:opacity .3s}
+#dropzone.hidden{opacity:0;pointer-events:none}
+#dzBox{border:2px dashed var(--line2);border-radius:18px;padding:70px 90px;text-align:center;transition:border-color .2s,background .2s;cursor:pointer}
+#dzBox:hover,#dzBox.drag{border-color:var(--accent);background:#161c28}
+#dzBox h1{font-size:1.5rem;font-weight:600;color:var(--text)}
+#dzBox h1 span{color:var(--accent)}
+#dzBox p{color:var(--faint);font-size:0.85rem;margin-top:8px}
+#dzBox .tips{color:var(--muted);font-size:0.7rem;margin-top:18px;line-height:1.8;text-align:left;border-top:1px solid var(--line);padding-top:12px}
+#tip{position:fixed;z-index:99;background:#0b0f16;border:1px solid var(--line2);border-radius:10px;padding:9px 12px;font-size:0.7rem;pointer-events:none;display:none;box-shadow:0 10px 36px rgba(0,0,0,.7);max-width:420px;line-height:1.5}
+#tip .t{font-weight:700;color:#f0f6fc;font-size:0.76rem}
+#tip .k{color:var(--accent);font-weight:600}
+#tip .d{color:var(--muted);font-size:0.65rem;margin-top:2px;text-transform:uppercase;letter-spacing:0.04em}
+#tip .row{color:#b1bac4}
+#tip .bad{color:#ffa198} #tip .good{color:#7ee787}
+::-webkit-scrollbar{height:6px;width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
+@media(max-width:720px){#kpis{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}.plabel{flex:0 0 74px;font-size:0.55rem}}
+
+/* ── ExoProfiler Pro visual system ── */
+:root{
+  --bg:#08090c;
+  --panel:#121316;
+  --panel2:#0d0f13;
+  --line:#25272d;
+  --line2:#343740;
+  --text:#f4f5f7;
+  --muted:#8b8d96;
+  --faint:#5c5f69;
+  --accent:#7d75ff;
+  --accent-strong:#564be8;
+  --red:#ef6478;
+  --amber:#d99a38;
+  --green:#5bd49a;
+  --purple:#9188ff;
+}
+html,body{
+  background:
+    radial-gradient(900px 420px at 50% -140px,rgba(86,75,232,.12),transparent 62%),
+    var(--bg);
+  color:var(--text);
+}
+#app{
+  max-width:none;width:100%;padding:0 22px 28px;gap:14px;
+  display:flex;flex-direction:column;align-items:stretch;
+}
+#header{
+  position:sticky;top:0;z-index:40;
+  margin:0 -22px;padding:13px 28px;
+  background:rgba(8,9,12,.92);
+  border-color:#1b1d22;border-radius:0;
+  box-shadow:0 1px 0 rgba(255,255,255,.03),0 12px 30px rgba(0,0,0,.22);
+  backdrop-filter:blur(18px);
+}
+#header>div:first-child{display:flex;align-items:center;gap:13px}
+#header>div:first-child:before{
+  content:'';width:42px;height:42px;border-radius:12px;display:block;flex:none;
+  background:linear-gradient(145deg,#665bff,#4238cf);
+  box-shadow:0 8px 24px rgba(0,0,0,.28);
+}
+#header .ttl{font-size:1.08rem;letter-spacing:-.02em}
+#header .ttl small{
+  display:inline-block;margin-left:8px;padding:5px 8px;
+  color:#9690ff;background:rgba(86,75,232,.14);border-radius:5px;font-size:.68rem;font-weight:700;
+}
+#meta{color:#858791;font-size:.78rem;margin-top:4px;line-height:1.3}
+.btns{gap:7px}
+button{
+  min-height:34px;padding:7px 12px;background:#17191e;border-color:#292c33;
+  color:#c5c7ce;border-radius:9px;font-weight:600;
+}
+button:hover{background:#20232a;border-color:#444753}
+button.primary{
+  background:linear-gradient(135deg,#675cff,#4d42dd);border-color:#6d63ff;
+  color:#fff;box-shadow:0 8px 20px rgba(0,0,0,.28)
+}
+button.primary:hover{background:linear-gradient(135deg,#746aff,#594de9)}
+button.danger{color:#f08091}
+#kpis{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.kpi{
+  min-height:124px;padding:17px 18px;display:flex;flex-direction:column;justify-content:space-between;
+  background:linear-gradient(145deg,#151619,#111215);
+  border-color:#292b31;border-radius:13px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+  position:relative;
+  overflow:hidden;
+  transition:border-color .15s ease, transform .15s ease;
+}
+.kpi.has-pop{cursor:pointer}
+.kpi.has-pop:hover{border-color:#3d4350;transform:translateY(-1px);box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.kpi .v{font-size:2.25rem;letter-spacing:-.05em;font-variant-numeric:tabular-nums}
+.kpi .v{
+  display:block;
+  min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.kpi .v .unit{
+  font-size:.48em;letter-spacing:0;color:#858791;font-weight:700;
+  vertical-align:baseline;margin-left:4px;
+}
+.kpi .v.truncated{cursor:help}
+.kpi .l{font-size:.72rem;letter-spacing:.105em;color:#92949d;display:flex;align-items:center;justify-content:space-between}
+.kpi .pop-hint{font-size:.58rem;color:#7d808a;letter-spacing:0;font-weight:600;opacity:.8;display:inline-flex;align-items:center;gap:2px}
+.kpi .s{
+  font-size:.78rem;color:#7d808a;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:100%;display:block;min-width:0;
+}
+.kpi:focus-within{border-color:#4c4e59;box-shadow:0 0 0 3px rgba(125,117,255,.1)}
+.kpi.warn{border-top:2px solid var(--amber)} .kpi.good{border-top:2px solid var(--green)}
+.kpi.bad{border-top:2px solid var(--red)} .kpi.acc{border-top:2px solid var(--accent)}
+.kpi.warn .v{color:#e3a849}.kpi.good .v{color:#6cdda7}.kpi.bad .v{color:#f47d8b}.kpi.acc .v{color:#918aff}
+
+/* ── KPI Interactive Popover ── */
+#kpiPop{
+  position:fixed;z-index:120;
+  background:#11141a;border:1px solid #2d3340;border-radius:12px;
+  box-shadow:0 18px 48px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.04);
+  max-width:520px;min-width:340px;max-height:480px;
+  overflow:hidden;display:none;flex-direction:column;
+  color:var(--text);font-size:0.75rem;
+  animation:kpiPopFadeIn .15s ease-out;pointer-events:auto;
+}
+@keyframes kpiPopFadeIn{
+  from{opacity:0;transform:translateY(-4px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.kpi-pop-head{
+  padding:12px 16px;border-bottom:1px solid #212631;background:#151922;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.kpi-pop-title{
+  font-size:0.85rem;font-weight:700;display:flex;align-items:center;gap:8px;
+}
+.kpi-pop-badge{
+  font-size:0.62rem;font-weight:700;text-transform:uppercase;padding:2px 7px;
+  border-radius:6px;letter-spacing:0.05em;
+}
+.kpi-pop-badge.bad{background:rgba(247,129,102,.18);color:#ffa198;border:1px solid rgba(247,129,102,.3)}
+.kpi-pop-badge.warn{background:rgba(227,168,73,.18);color:#e3b341;border:1px solid rgba(227,168,73,.3)}
+.kpi-pop-badge.good{background:rgba(63,185,80,.18);color:#7ee787;border:1px solid rgba(63,185,80,.3)}
+.kpi-pop-badge.acc{background:rgba(88,166,255,.18);color:#79c0ff;border:1px solid rgba(88,166,255,.3)}
+
+.kpi-pop-body{
+  padding:12px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;max-height:380px;
+}
+.kpi-pop-chips{display:flex;gap:6px;flex-wrap:wrap}
+.kpi-pop-chip{
+  padding:3px 8px;border-radius:6px;background:#1a1e27;border:1px solid #282f3d;
+  font-size:0.68rem;font-weight:600;color:#c9d1d9;
+}
+.kpi-pop-chip.bad{border-color:#592420;background:#221516;color:#ffa198}
+.kpi-pop-chip.acc{border-color:#1c3656;background:#111e2e;color:#79c0ff}
+.kpi-pop-chip.good{border-color:#1e3f28;background:#122117;color:#7ee787}
+
+/* Error feed styling */
+.kpi-err-item{
+  background:#161a22;border:1px solid #232a36;border-radius:8px;padding:8px 10px;
+  display:flex;flex-direction:column;gap:4px;transition:background .15s, border-color .15s;cursor:pointer;
+}
+.kpi-err-item:hover{background:#1c222c;border-color:#384254}
+.kpi-err-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.kpi-err-name{font-weight:700;color:#ffa198;font-size:0.74rem}
+.kpi-err-time{font-family:ui-monospace,monospace;font-size:0.65rem;color:#8b949e}
+.kpi-err-msg{font-size:0.68rem;color:#8b949e;word-break:break-all;line-height:1.35}
+.kpi-err-code{
+  display:inline-block;font-family:ui-monospace,monospace;font-size:0.64rem;
+  color:#ff7b72;background:rgba(255,123,114,.1);padding:1px 5px;border-radius:4px;margin-right:4px;
+}
+
+/* Quality ladder step progression */
+.ql-ladder-bar{
+  display:flex;height:28px;border-radius:6px;overflow:hidden;
+  background:#0d1117;border:1px solid #2d3340;margin:4px 0 8px;
+}
+.ql-segment{
+  display:flex;align-items:center;justify-content:center;
+  font-size:0.65rem;font-weight:700;color:#fff;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;padding:0 6px;transition:opacity .15s;position:relative;
+}
+.ql-segment:hover{opacity:.9}
+.ql-segment.rung-1{background:#1f6feb}
+.ql-segment.rung-2{background:#388bfd}
+.ql-segment.rung-3{background:#58a6ff;color:#0d1117}
+.ql-segment.rung-4{background:#79c0ff;color:#0d1117}
+
+.ql-table{width:100%;border-collapse:collapse;font-size:0.7rem}
+.ql-table th{
+  text-align:left;padding:6px 8px;border-bottom:1px solid #232a36;color:#8b949e;
+  font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;
+}
+.ql-table td{padding:7px 8px;border-bottom:1px solid #1a202a;vertical-align:middle}
+.ql-table tr.ql-row:hover td{background:#181d26;cursor:pointer}
+.ql-arrow{color:#7ee787;font-weight:700;margin:0 4px}
+.ql-arrow.down{color:#ffa198}
+.ql-btn-jump{
+  font-size:0.62rem;padding:2px 7px;background:#1e2430;border:1px solid #2e384b;
+  border-radius:4px;color:#79c0ff;cursor:pointer;white-space:nowrap;
+}
+.ql-btn-jump:hover{background:#273142;border-color:#58a6ff}
+
+.kpi-pop-foot{
+  padding:9px 16px;border-top:1px solid #212631;background:#131720;
+  display:flex;align-items:center;justify-content:space-between;font-size:0.68rem;color:#8b949e;
+}
+#toolbar{
+  min-height:52px;padding:8px 12px;background:#121316;border-color:#282a30;border-radius:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.02)
+}
+#search{background:#0b0c0f;border-color:#252830;border-radius:9px;padding:9px 13px}
+#search:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(125,117,255,.12)}
+.chip{padding:5px 10px;background:#0b0c0f;border-color:#2b2e36;border-radius:6px;font-weight:700}
+.chip:hover{border-color:var(--accent);color:#d9d7ff}
+.chip:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+#stack{
+  background:#101114;border-color:#292b31;border-radius:14px;
+  box-shadow:0 14px 34px rgba(0,0,0,.2);overflow:hidden
+}
+.panel+.panel{border-top:1px solid #1d1f24}
+.plabel{
+  flex-basis:118px;padding-left:16px;background:#151619;border-right-color:#272930;
+  color:#888b95;font-size:.62rem;letter-spacing:.11em
+}
+.plabel .sub{color:#5e616b}
+.pwrap canvas,.scrollwrap canvas{background:linear-gradient(180deg,rgba(255,255,255,.008),transparent)}
+#minimapWrap{padding:8px 12px;background:#111215;border-color:#292b31;border-radius:11px}
+#status{padding:9px 13px;background:#111215;border-color:#292b31;border-radius:10px;color:#858791}
+#status{align-items:center;min-height:42px}
+#status .r{align-items:center;gap:12px}
+#status .zoomBtns{align-items:center}
+#status .zoomBtns button{background:#17191e;border-color:#292c33}
+#status .r{font-variant-numeric:tabular-nums;color:#858791}
+#diagnosis{
+  gap:10px;margin-top:3px;padding-top:5px;
+  border-top:1px solid #1e2026;
+}
+#diagHead{
+  padding:8px 3px 5px;color:#858791;
+  display:flex;align-items:baseline;gap:10px;
+}
+#diagHead b{font-size:.9rem;letter-spacing:.14em;text-transform:uppercase;color:#999ba5}
+#diagHead span{font-size:.76rem;color:#767983;text-transform:none;letter-spacing:0}
+.dg{
+  padding:17px 18px;background:#111215;border-color:#24262d;border-radius:13px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.018)
+}
+.dg:hover{border-color:#5b55ba;transform:translateY(-1px)}
+.dg .sev{padding:3px 9px;border-radius:6px}
+.dg>b{display:block;font-size:.96rem;line-height:1.3;color:#f0f1f3}
+.dg>span{display:block;margin-top:8px;font-size:.86rem;line-height:1.55;color:#9699a3}
+details#deviceRep{padding:10px 14px;background:#111215;border-color:#292b31;border-radius:11px}
+details#deviceRep summary{font-size:.78rem;letter-spacing:.1em;color:#9699a3}
+#deviceBody{
+  margin:12px 2px 2px;padding:12px 14px;
+  background:#0d0f13;border:1px solid #252830;border-radius:10px;
+  font-size:.76rem;line-height:1.45;color:#9b9ea8;
+}
+#deviceBody h4{
+  margin:12px 0 7px;padding-bottom:5px;
+  border-bottom:1px solid #252830;color:#777a85;
+  font-size:.62rem;font-weight:700;letter-spacing:.11em;text-transform:uppercase;
+}
+#deviceBody h4:first-child{margin-top:0}
+#deviceBody .dev-row{
+  display:grid;grid-template-columns:minmax(120px,170px) minmax(0,1fr);
+  gap:12px;align-items:baseline;margin:0;padding:6px 0;
+  border-bottom:1px solid rgba(255,255,255,.035);
+}
+#deviceBody .dev-row:last-child{border-bottom:0}
+#deviceBody .dev-row .k{color:#7d808b;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em}
+#deviceBody .dev-row span:last-child{min-width:0;color:#e0e1e5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#deviceBody .dev-row span:last-child:hover{overflow:visible;white-space:normal;word-break:break-word}
+::selection{background:rgba(125,117,255,.35);color:#fff}
+input{caret-color:var(--accent)}
+#drawer{background:#101114;border-left-color:#30333b;box-shadow:-20px 0 55px rgba(0,0,0,.45)}
+#drawerHead,#specHead,#tableHead{padding:14px 16px;border-bottom-color:#282a30}
+#tableHead{gap:10px}
+#tableHead>b{margin-right:auto;white-space:nowrap}
+#tableSearch{
+  width:min(280px,42vw);min-width:150px;padding:8px 11px;
+  background:#0b0c0f;border:1px solid #292c34;border-radius:8px;
+  color:var(--text);font:inherit;font-size:.72rem;outline:none;
+}
+#tableSearch:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(125,117,255,.12)}
+#tableSearch::placeholder{color:#5f626c}
+#drawerHead .t{font-size:.86rem}
+#drawerClose,#btnModalClose,#btnSpecClose{min-height:30px;padding:3px 9px}
+#modal,#specModal{background:rgba(3,4,7,.78);backdrop-filter:blur(7px)}
+#tableBox,#specBox{background:#111215;border-color:#333640;border-radius:14px;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+th{background:#181a1f;border-bottom-color:#30323a}
+tr:hover td{background:#1a1d24}
+#tip{background:#111318;border-color:#3a3d48;box-shadow:0 14px 45px rgba(0,0,0,.6)}
+#dropzone{background:
+  radial-gradient(650px 300px at 50% 34%,rgba(86,75,232,.14),transparent 68%),var(--bg)}
+#dzBox{
+  padding:78px 96px;background:rgba(18,19,22,.72);border-color:#373a45;
+  box-shadow:0 25px 80px rgba(0,0,0,.3);border-radius:20px
+}
+#dzBox:hover,#dzBox.drag{border-color:#756cff;background:rgba(29,28,49,.8);box-shadow:0 25px 80px rgba(0,0,0,.4)}
+#dzBox h1{font-size:1.6rem;letter-spacing:-.03em}
+#dzBox h1 span{color:#918aff}
+#dzBox p{color:#777a84}
+#dzBox .tips{border-top-color:#2a2d35;color:#8a8d97}
+@media(max-width:1000px){#kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:720px){
+  #app{
+    padding:0 12px 20px;
+    display:flex;
+  }
+  #header{margin:0 -12px;padding:12px 16px}
+  #header>div:first-child:before{width:36px;height:36px;border-radius:10px}
+  #header .ttl{font-size:.96rem}
+  #header .ttl small{display:block;margin:4px 0 0;width:max-content}
+  #kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .kpi{min-height:98px;padding:13px}
+  .kpi .v{font-size:1.35rem}
+  .btns{width:100%}.btns button{flex:1}
+  #deviceBody .dev-row{grid-template-columns:1fr;gap:2px}
+  #deviceBody .dev-row span:last-child{white-space:normal;overflow:visible}
+  #status{align-items:flex-start}
+  #status .r{width:100%;gap:8px}
+  #tableHead{flex-wrap:wrap}
+  #tableSearch{order:3;width:100%;min-width:0}
+  #dzBox{padding:52px 24px;margin:16px}
+}
+</style>
+</head>
+<body>
+
+<!-- DROP ZONE -->
+<div id="dropzone">
+  <div id="dzBox">
+    <h1>📂 Drop your <span>session.json</span> here</h1>
+    <p>or click to select · ExoPlayer Profiler <b>v3</b> — ABR · Waterfall · Stall Forensics · Diagnosis</p>
+    <div class="tips">
+      ⌨ <b>drag</b> to pan &nbsp;·&nbsp; <b>wheel</b> zoom &nbsp;·&nbsp; <b>dbl-click</b> reset<br>
+      ▶ <b>replay</b> the session &nbsp;·&nbsp; <b>click</b> a red stall zone → forensic analysis<br>
+      <b>/</b> search &nbsp;·&nbsp; <b>←→</b> pan &nbsp;·&nbsp; <b>+ −</b> zoom &nbsp;·&nbsp; <b>0</b> reset &nbsp;·&nbsp; <b>esc</b> close
+    </div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+
+  <div id="header">
+    <div>
+      <div class="ttl">🎥 ExoPlayer Profiler <small>v2 · ABR control-loop</small></div>
+      <div id="meta"></div>
+    </div>
+    <div class="btns">
+      <button id="btnBack" title="Back to v4 dashboard">← Dashboard</button>
+      <button id="btnLive" title="Toggle live ADB tail — appends ws://localhost:9090 events and refreshes UI">🔴 Live</button>
+      <button id="btnSpec">📜 Capture spec</button>
+      <button id="btnReplay" class="primary">▶ Replay</button>
+      <button id="btnTable">📋 Events table</button>
+      <button id="btnCsv">⬇ CSV</button>
+      <button id="btnLoad">📂 Load…</button>
+    </div>
+  </div>
+
+  <div id="kpis"></div>
+
+  <div id="diagnosis" style="display:none"></div>
+
+  <details id="deviceRep" style="display:none"><summary>📱 Device report</summary><div id="deviceBody"></div></details>
+
+  <div id="toolbar">
+    <input id="search" type="text" placeholder="/  search uri · event · category · decoder …" />
+    <span id="searchCount"></span>
+    <div id="chips"></div>
+  </div>
+
+  <div id="stack"></div>
+  <div id="minimapWrap"><canvas id="minimap" height="44"></canvas></div>
+
+  <div id="status">
+    <div id="statLeft">hover timeline — click for details</div>
+    <div class="zoomBtns">
+      <button id="btnZoomIn" title="zoom in (pinch / wheel up)">🔍 +</button>
+      <button id="btnZoomOut" title="zoom out">🔍 −</button>
+      <button id="btnReset" title="reset view (0 / dbl-click)">⟲ Reset</button>
+    </div>
+    <div class="r" id="statRight"></div>
+  </div>
+</div>
+
+<div id="tip"></div>
+<div id="kpiPop"></div>
+
+<div id="drawer">
+  <div id="drawerHead"><span class="t" id="drawerTitle">Details</span><button id="drawerClose">✕</button></div>
+  <div id="drawerBody"></div>
+</div>
+
+<div id="modal">
+  <div id="tableBox">
+    <div id="tableHead"><b style="font-size:.85rem">All events</b><input id="tableSearch" type="search" placeholder="Filter events…" aria-label="Filter events table"><button id="btnModalClose">✕</button></div>
+    <div id="tableWrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
+<div id="specModal">
+  <div id="specBox">
+    <div id="specHead"><b style="font-size:.85rem">Capture spec — what your Android exporter must emit for v3 features</b><button id="btnSpecClose">✕</button></div>
+    <pre id="specText"></pre>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ═══════════════════════════ CONFIG ═══════════════════════════ */
+const CAT_COLORS={app:'#6e7681',sdk:'#58a6ff',network:'#1f6feb',timeline:'#d29922',drm:'#f78166',tracks:'#bc4c8f',decoder:'#2ea043',renderer:'#8957e5',buffer:'#3fb950',playback:'#d29922',seek:'#e3b341',bandwidth:'#1f6feb',video:'#58a6ff',audio:'#3fb950',drops:'#f78166',underrun:'#e3b341',error:'#ff5252',default:'#484f58'};
+const CAT_LABELS={app:'APP',sdk:'SDK',network:'NETWORK',timeline:'TIMELINE',drm:'DRM',tracks:'TRACKS',decoder:'DECODER',renderer:'RENDERER',buffer:'BUFFER',playback:'PLAYBACK',seek:'SEEK',bandwidth:'BANDWIDTH',video:'VIDEO',audio:'AUDIO',drops:'DROPS',underrun:'UNDERRUN',error:'ERROR'};
+const CAT_ORDER=['app','sdk','network','timeline','drm','tracks','decoder','renderer','buffer','playback','seek','bandwidth','video','audio','drops','underrun','error'];
+const LANE_DEFS=[
+  {key:'manifest',label:'MANIFEST',color:'#d29922'},
+  {key:'license',label:'LICENSE',color:'#f78166'},
+  {key:'media_initialization',label:'INIT',color:'#8957e5'},
+  {key:'video',label:'VIDEO SEG',color:'#1f6feb'},
+  {key:'audio',label:'AUDIO SEG',color:'#3fb950'},
+  {key:'other',label:'OTHER',color:'#6e7681'},
+];
+const ROWH=26, STALL_COLOR='#da3633';
+
+/* ═══════════════════════════ STATE ═══════════════════════════ */
+const S={
+  raw:null, events:[], session:{},
+  loads:[], estimates:[], bufferSamples:[], quality:{1:[],2:[]}, stalls:[],
+  startup:null, playSegs:[], seeks:[], markers:[],
+  categories:{}, kpis:[],
+  view:{v0:0,v1:1000},
+  hoverT:null, hoverEvt:null, hoverLoad:null, sel:null,
+  filterText:'', hiddenCats:new Set(), showStalls:true,
+  playing:false, playT:null, playRAF:null,
+  tableSort:{key:'timeMs',dir:1},
+  fullRange:1000,
+};
+
+/* ═══════════════════════════ DOM ═══════════════════════════ */
+const $=id=>document.getElementById(id);
+const stackEl=$('stack'), tipEl=$('tip'), kpiPopEl=$('kpiPop'), kpisEl=$('kpis'), chipsEl=$('chips');
+const statLeft=$('statLeft'), statRight=$('statRight'), searchEl=$('search');
+const drawer=$('drawer'), drawerTitle=$('drawerTitle'), drawerBody=$('drawerBody');
+const modal=$('modal'), tableEl=$('table'), tableWrap=$('tableWrap');
+const minimapEl=$('minimap');
+let W=0; // shared canvas css width
+const panels=[]; // {label, sub, height, draw, scrollable, canvas}
+
+/* ═══════════════════════════ UTILS ═══════════════════════════ */
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function fmtMs(ms){if(ms==null)return '—';if(ms<1000)return ms.toFixed(0)+' ms';if(ms<60000)return (ms/1000).toFixed(2)+' s';const m=Math.floor(ms/60000),s=Math.round(ms%60000/1000);return m+'m '+s+'s'}
+function fmtDur(ms){if(ms==null)return '—';if(ms<1)return '0 ms';if(ms<1000)return ms.toFixed(0)+' ms';return (ms/1000).toFixed(2)+' s'}
+function fmtBytes(b){if(b==null)return '—';if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB'}
+function fmtKbps(k){if(k==null||isNaN(k))return '—';if(k>=1000)return (k/1000).toFixed(2)+' Mbps';return Math.round(k)+' kbps'}
+function fmtKbpsInt(k){if(k==null||isNaN(k))return '—';if(k>=1000)return (k/1000).toFixed(1)+'M';return Math.round(k)+'k'}
+function shortUri(u){if(!u)return '—';const p=u.split('/');return p.slice(-2).join('/')||u}
+const TRACK={1:'AUDIO',2:'VIDEO',3:'TEXT',4:'METADATA',0:'DEFAULT','-1':'N/A'};
+const SELREASON={0:'INITIAL',1:'ADAPTIVE',2:'MANUAL',3:'TRICKPLAY',4:'AD_INSERTION'};
+const PSTATE={1:'IDLE',2:'BUFFERING',3:'READY',4:'ENDED'};
+const DISCREASON={0:'AUTO_TRANSITION',1:'SEEK',2:'DISCONTINUITY',3:'AD_INSERTION',4:'INTERNAL'};
+const PWR={0:'false',1:'true',2:'INTERRUPTED'};
+function catOf(e){
+  const c=(e.category||'').toLowerCase(),ev=e.event||'';
+  if(ev==='DroppedFrames')return'drops';
+  if(ev==='Underrun'||ev==='AudioSinkError')return'underrun';
+  if(ev==='LoadError'||ev==='PlaybackError'||ev==='DrmError'||ev==='CodecError'||/error/i.test(ev))return'error';
+  if(ev==='CodecDiscovered'||ev==='CodecCreated'||ev==='CodecConfigured'||ev==='CodecStarted')return'decoder';
+  if(ev==='SessionAcquired'||ev==='KeysLoaded'||ev==='KeysRestored'||ev==='KeysRemoved')return'drm';
+  if(c==='session')return'app';
+  if(c==='video'||c==='audio')return'sdk';
+  if(c==='network')return ev==='Estimate'?'bandwidth':'network';
+  if(c==='timeline')return'timeline';
+  if(c==='drm')return'drm';
+  if(c==='tracks')return'tracks';
+  if(c==='decoder')return'decoder';
+  if(c==='renderer')return'renderer';
+  if(c==='loading')return'buffer';
+  if(c==='playback')return'playback';
+  if(c==='seek')return'seek';
+  if(c==='bandwidth')return'bandwidth';
+  return'default';
+}
+
+/* ═══════════════════════════ ANALYSIS ═══════════════════════════ */
+function analyze(raw){
+  const evs=(raw.events||[]).map((e,i)=>({...e,idx:i,rel:e.timeMs,cat:catOf(e)}));
+  evs.sort((a,b)=>a.rel-b.rel||a.idx-b.idx);
+  const t0=evs.length?evs[0].rel:0;
+  const full=Math.max(1000,(raw.session?.durationMs||0),evs.length?evs[evs.length-1].rel+500:1000);
+
+  /* loads: pair LoadStarted→LoadCompleted by uri */
+  const loads=[],pending=new Map(),stalls=[];
+  for(const e of evs){
+    const d=e.details||{};
+    if(e.event==='LoadStarted'){if(d.uri&&!pending.has(d.uri))pending.set(d.uri,e);}
+    else if(e.event==='LoadCompleted'){
+      const st=d.uri?pending.get(d.uri):null;if(st)pending.delete(d.uri);
+      const start=st?st.rel:e.rel-(d.loadDurationMs||0);
+      const dur=d.loadDurationMs||Math.max(1,e.rel-start);
+      const bytes=d.bytesLoaded||0;
+      let lane=LANE_DEFS.findIndex(l=>l.key===(d.dataType||'other'));
+      if(lane<0&&d.dataType==='media'){lane=LANE_DEFS.findIndex(l=>l.key===(d.trackType===2?'video':d.trackType===1?'audio':'other'));}
+      loads.push({start,end:e.rel,dur,bytes,kbps:bytes&&dur?bytes*8/dur:0,dataType:d.dataType||'media',trackType:d.trackType,uri:d.uri,contentType:d.contentType,lane:lane<0?LANE_DEFS.length-1:lane,retried:false});
+    }
+  }
+  /* retries: a LoadError before the next completed load of the same uri */
+  const loadErrs=evs.filter(e=>e.event==='LoadError');
+  for(const er of loadErrs){
+    const uri=er.details?.uri;if(!uri)continue;
+    const next=loads.find(l=>l.uri===uri&&l.start>=er.rel&&l.start<=er.rel+10000);
+    if(next)next.retried=true;
+  }
+  loads.sort((a,b)=>a.start-b.start);
+  const laneMed={};
+  for(const l of loads){if(laneMed[l.lane]===undefined)laneMed[l.lane]=[];laneMed[l.lane].push(l.dur)}
+  for(const k in laneMed){laneMed[k].sort((a,b)=>a-b);laneMed[k]=laneMed[k][Math.floor(laneMed[k].length/2)]||0}
+  for(const l of loads)l.slow=l.dur>laneMed[l.lane]*3,l.crit=l.dur>laneMed[l.lane]*5;
+
+  /* estimates */
+  const estimates=evs.filter(e=>e.event==='Estimate').map(e=>({t:e.rel,kbps:(e.details?.bitrateEstimate||0)/1000,loadMs:e.details?.totalLoadTimeMs||0,bytes:e.details?.totalBytesLoaded||0}));
+
+  /* buffer samples */
+  const bufferSamples=evs.filter(e=>e.event==='StateChanged'&&e.details&&e.details.bufferedDurationMs!=null).map(e=>({t:e.rel,v:e.details.bufferedDurationMs}));
+
+  /* quality ladder */
+  const q={1:[],2:[]};
+  for(const e of evs)if(e.event==='DownstreamFormatChanged'){
+    const d=e.details||{},tt=d.trackType;
+    if(tt===1||tt===2)q[tt].push({
+      t:e.rel,
+      kbps:(d.bitrate||0)/1000,
+      w:d.width||0,
+      h:d.height||0,
+      mime:d.mimeType||'',
+      codecs:d.codecs||'',
+      selectionReason:d.selectionReason,
+      idx:e.idx
+    });
+  }
+  for(const tt of[1,2]){for(let i=0;i<q[tt].length;i++)q[tt][i].end=(q[tt][i+1]?.t)||full;}
+  const quality={1:q[1],2:q[2]};
+
+  /* seeks (before stalls — stalls reference them) */
+  const seeks=[];
+  const seenSeek=new Set();
+  for(const e of evs)if(e.event==='PositionDiscontinuity'){
+    const d=e.details||{};
+    if(d.reason===1||(d.oldPositionMs!=null&&d.oldPositionMs!==d.newPositionMs)){
+      if(seenSeek.has(e.rel))continue;
+      seenSeek.add(e.rel);
+      seeks.push({t:e.rel,from:d.oldPositionMs,to:d.newPositionMs});
+    }
+  }
+  const seeksNear=t=>{let best=null,bd=2500;for(const sk of seeks){const dt=t-sk.t;if(dt>=0&&dt<bd){bd=dt;best=sk}}return best};
+
+  /* stalls: StateChanged BUFFERING(2)→READY(3); startup = start→first READY */
+  let bufStart=null,firstReady=null,firstBuf=null,lastEvt=0;
+  for(const e of evs){lastEvt=Math.max(lastEvt,e.rel);if(e.event!=='StateChanged')continue;
+    const st=e.details?.playbackState;
+    if(st===2){if(bufStart==null)bufStart=e.rel;if(firstBuf==null)firstBuf=e.rel;}
+    else if(st===3){if(firstReady==null)firstReady=e.rel;if(bufStart!=null){stalls.push({start:bufStart,end:e.rel,bufAtStart:e.details?.bufferedDurationMs||0,seek:seeksNear(bufStart)});bufStart=null;}}
+    else bufStart=null;
+  }
+  /* fallback: ReadyChanged isRebuffering windows when no StateChanged pair covers them */
+  if(!stalls.length&&firstBuf!=null&&firstReady!=null)stalls.push({start:firstBuf,end:firstReady,bufAtStart:0});
+  const startup={start:t0,end:firstReady??(firstBuf??lastEvt),kind:'startup'};
+
+  /* play segments */
+  const playSegs=[];let cur=null;
+  for(const e of evs){
+    if(e.event==='Playing'&&!cur)cur={start:e.rel};
+    else if((e.event==='Paused'||e.event==='Ended')&&cur){cur.end=e.rel;if(cur.end-cur.start>50)playSegs.push(cur);cur=null;}
+  }
+  if(cur)playSegs.push({start:cur.start,end:lastEvt});
+  playSegs.sort((a,b)=>a.start-b.start);
+  for(let i=playSegs.length-1;i>0;i--)if(playSegs[i].start-playSegs[i-1].end<1000){playSegs[i-1].end=Math.max(playSegs[i-1].end,playSegs[i].end);playSegs.splice(i,1);}
+
+  /* markers */
+  const markers=[];
+  for(const e of evs){
+    if(e.event==='Playing')markers.push({t:e.rel,type:'play'});
+    else if(e.event==='Paused')markers.push({t:e.rel,type:'pause'});
+    else if(e.event==='Ended')markers.push({t:e.rel,type:'end'});
+    else if(e.event==='RenderedFirstFrame')markers.push({t:e.rel,type:'firstframe'});
+    else if(e.event==='PositionDiscontinuity'&&(e.details?.reason===1)){
+      const rich=evs.find(x=>x.event==='PositionDiscontinuity'&&x.rel===e.rel&&x.details?.oldPositionMs!=null)||e;
+      markers.push({t:e.rel,type:'seek',from:rich.details?.oldPositionMs,to:rich.details?.newPositionMs});
+    }
+    else if(e.event==='SessionReleased')markers.push({t:e.rel,type:e.cat==='drm'?'drmrel':'release'});
+  }
+  /* quality switches */
+  let prevV=null;
+  for(const st of quality[2]){if(prevV!=null&&st.kbps!==prevV)markers.push({t:st.t,type:'qswitch',from:prevV,to:st.kbps});prevV=st.kbps;}
+  /* dedupe markers at identical time+type (exporter emits duplicate events) */
+  {
+    const seen=new Set(),deduped=[];
+    for(const m of markers){const k=m.type+'@'+m.t;if(seen.has(k))continue;seen.add(k);deduped.push(m)}
+    markers.length=0;markers.push(...deduped);
+  }
+
+  /* ── v3: startup stages (wait vs work) ── */
+  const manifestEnd=(evs.find(e=>e.event==='LoadCompleted'&&e.details?.dataType==='manifest')||{}).rel??t0;
+  const timelineEvt=evs.find(e=>e.event==='Changed'&&e.details?.periodCount!=null);
+  const tracksEvt=evs.find(e=>e.event==='Changed'&&Array.isArray(e.details?.groups))||evs.find(e=>e.event==='Enabled');
+  const vdEvt=evs.find(e=>e.event==='VideoDecoderInitialized');
+  const decStart=vdEvt?Math.max(t0,vdEvt.rel-(vdEvt.details?.initializationDurationMs||0)):null;
+  const decEnd=vdEvt?vdEvt.rel:null;
+  const drmOpen=evs.find(e=>e.cat==='drm'&&(e.details?.state===1||e.details?.state===2||e.event==='SessionAcquired'));
+  const drmReady=[...evs].reverse().find(e=>e.cat==='drm'&&(e.event==='KeysLoaded'||e.event==='KeysRestored'||e.details?.state===3));
+  const drmStart=drmOpen?drmOpen.rel:null;
+  const drmEnd=(drmReady?drmReady.rel:drmStart);
+  const firstFrame=evs.find(e=>e.event==='RenderedFirstFrame');
+  const startupStages=[];
+  startupStages.push({name:'MANIFEST',start:t0,end:Math.min(timelineEvt?timelineEvt.rel:manifestEnd,manifestEnd),color:'#d29922'});
+  if(tracksEvt)startupStages.push({name:'TRACKS',start:timelineEvt?timelineEvt.rel:manifestEnd,end:tracksEvt.rel,color:'#bc4c8f'});
+  if(drmStart!=null&&drmEnd!=null)startupStages.push({name:'DRM',start:drmStart,end:Math.max(drmEnd,drmStart),color:'#f78166'});
+  if(decStart!=null&&decEnd!=null)startupStages.push({name:'DECODER',start:decStart,end:decEnd,color:'#2ea043'});
+  const lastStageEnd=startupStages.reduce((a,b)=>Math.max(a,b.end),t0);
+  if(firstReady!=null&&lastStageEnd<firstReady)startupStages.push({name:'BUFFER FILL',start:lastStageEnd,end:firstReady,color:'#3fb950'});
+  if(firstReady!=null&&firstFrame)startupStages.push({name:'PRESENT',start:firstReady,end:firstFrame.rel,color:'#58a6ff'});
+  startupStages.forEach(s=>s.dur=Math.max(0,s.end-s.start));
+  const blocking=firstReady!=null?startupStages.reduce((a,b)=>Math.abs(a.end-firstReady)<Math.abs(b.end-firstReady)?a:b):null;
+
+  /* ── v3: pause windows (PlayWhenReady false) ── */
+  const pwrSegs=[];let pwr=null;
+  for(const e of evs)if(e.event==='PlayWhenReadyChanged'){
+    if(e.details?.playWhenReady===false&&!pwr)pwr={start:e.rel,reason:e.details?.reason};
+    else if(e.details?.playWhenReady!==false&&pwr){pwr.end=e.rel;pwrSegs.push(pwr);pwr=null;}
+  }
+
+  /* ── v3: seek windows (seek → recovery) ── */
+  const seekWindows=[];
+  for(const sk of seeks){
+    let end=sk.t+800;
+    for(const e of evs){
+      if(e.rel<=sk.t)continue;
+      if(e.event==='Playing'||(e.event==='StateChanged'&&e.details?.playbackState===3)||(e.event==='ReadyChanged'&&e.details?.state===1)){end=e.rel;break}
+    }
+    seekWindows.push({start:sk.t,end:Math.max(sk.t+200,Math.min(end,full))});
+  }
+
+  /* ── v3: brain phases (inferred intent timeline) ── */
+  const phases=[];
+  const tTimeline=timelineEvt?timelineEvt.rel:null,tTracks=tracksEvt?tracksEvt.rel:null;
+  if(tTimeline!=null&&tTimeline>t0)phases.push({kind:'preparing',start:t0,end:tTimeline});
+  else if(tTimeline==null)phases.push({kind:'preparing',start:t0,end:tTracks??firstReady??lastEvt});
+  if(tTracks!=null&&tTracks>tTimeline)phases.push({kind:'selecting',start:tTimeline,end:tTracks});
+  if(drmStart!=null&&drmEnd!=null&&drmEnd>drmStart)phases.push({kind:'drm',start:drmStart,end:drmEnd});
+  if(firstReady!=null){const s=Math.max(tTracks??t0,lastStageEnd);if(s<firstReady)phases.push({kind:'buffering',start:s,end:firstReady});}
+  for(const ps of playSegs)phases.push({kind:'playing',start:ps.start,end:ps.end});
+  for(const sk of seekWindows)phases.push({kind:'seeking',start:sk.start,end:sk.end});
+  for(const st of stalls)phases.push({kind:'rebuffer',start:st.start,end:st.end});
+  for(const pw of pwrSegs)phases.push({kind:'paused',start:pw.start,end:pw.end});
+  phases.sort((a,b)=>a.start-b.start||a.end-b.end);
+  const phaseIn=phases.slice();phases.length=0;
+  let pt=t0;
+  for(const ph of phaseIn){
+    const s=Math.max(pt,ph.start),e=Math.max(s,Math.min(ph.end,full));
+    if(s>pt)phases.push({kind:'idle',start:pt,end:s});
+    if(e>s)phases.push({kind:ph.kind,start:s,end:e});
+    pt=Math.max(pt,e);
+  }
+  if(pt<lastEvt)phases.push({kind:'idle',start:pt,end:lastEvt});
+  const merged=[];
+  for(const ph of phases){const l=merged[merged.length-1];if(l&&l.kind===ph.kind)l.end=Math.max(l.end,ph.end);else merged.push({...ph});}
+  const brainPhases=merged;
+
+  /* ── v3: health counters ── */
+  const drops=evs.filter(e=>e.event==='DroppedFrames').reduce((a,e)=>a+(e.details?.count||0),0);
+  const underruns=evs.filter(e=>e.event==='Underrun').length;
+  const errors=evs.filter(e=>e.cat==='error');
+  const device=raw.device||raw.session?.device||null;
+
+  /* categories */
+  const categories={};
+  for(const e of evs){(categories[e.cat]=categories[e.cat]||[]).push(e)}
+
+  /* KPIs */
+  const vRungs = computeVRungs(quality[2]||[], full);
+  const vSwitches = computeVSwitches(vRungs);
+  const kpis=computeKpis({raw,t0,evs,loads,estimates,bufferSamples,quality,stalls,startup,playSegs,seeks,full,drops,underruns,errors,device,drmReady,drmEnd,firstReady,vRungs,vSwitches});
+
+  Object.assign(S,{raw,events:evs,session:raw.session||{},loads,estimates,bufferSamples,quality,stalls,startup,playSegs,seeks,markers,categories,kpis,fullRange:full,device,startupStages,blocking,brainPhases,pwrSegs,seekWindows,drops,underruns,errors,drmReady,drmEnd,firstReady,vRungs,vSwitches});
+  S.view={v0:0,v1:full};
+  S.playT=null;S.playing=false;
+}
+function computeVRungs(vq, full){
+  const rungs = [];
+  let prev = null;
+  for (const st of (vq || [])) {
+    if (!prev || st.kbps !== prev.kbps || (st.h && st.h !== prev.h)) {
+      rungs.push({...st});
+      prev = st;
+    }
+  }
+  for (let i = 0; i < rungs.length; i++) {
+    rungs[i].end = rungs[i+1]?.t || full || (rungs[i].t + 1000);
+    rungs[i].dur = Math.max(0, rungs[i].end - rungs[i].t);
+  }
+  return rungs;
+}
+function computeVSwitches(rungs){
+  const switches = [];
+  for (let i = 1; i < (rungs || []).length; i++) {
+    const prev = rungs[i-1], curr = rungs[i];
+    const isUp = curr.kbps > prev.kbps;
+    switches.push({
+      t: curr.t,
+      from: prev,
+      to: curr,
+      isUpgrade: isUp,
+      deltaKbps: curr.kbps - prev.kbps,
+      ratio: prev.kbps ? Math.abs((curr.kbps - prev.kbps) / prev.kbps * 100) : 0,
+      idx: curr.idx
+    });
+  }
+  return switches;
+}
+function computeKpis(ctx){
+  const{evs,loads,estimates,bufferSamples,quality,stalls,startup,playSegs,seeks,full,t0,drops,underruns,errors,device,drmReady,drmEnd,firstReady,vRungs:ctxVRungs,vSwitches:ctxVSwitches}=ctx;
+  const s=ctx.raw.session||{};
+  const out=[];
+  const firstFrame=evs.find(e=>e.event==='RenderedFirstFrame');
+  out.push({v:firstFrame?fmtDur(firstFrame.rel-t0):'—',l:'Time to first frame',s:'SessionStart → first frame',cls:firstFrame?'good':'',sub:firstFrame?'':'no first-frame event'});
+  out.push({v:fmtDur((startup?.end||0)-t0),l:'Startup → READY',s:'manifest+decode+init buffering',cls:'acc'});
+  const stallT=stalls.reduce((a,b)=>a+(b.end-b.start),0);
+  const playT=playSegs.reduce((a,b)=>a+(b.end-b.start),0);
+  const ratio=playT?stallT/(playT+stallT)*100:0;
+  out.push({v:stalls.length+' · '+fmtDur(stallT),l:'Rebuffers',s:'total · '+ratio.toFixed(1)+'% of playback',cls:stalls.length>0?'bad':'good'});
+  out.push({v:fmtDur(playT),l:'Playback time',s:playSegs.length+' segment'+(playSegs.length===1?'':'s')+' · '+fmtDur(full-t0)+' session'});
+  const media=loads.filter(l=>l.dataType==='media'&&l.bytes>0&&l.dur>0);
+  const totB=media.reduce((a,b)=>a+b.bytes,0),totD=media.reduce((a,b)=>a+b.dur,0);
+  const avg=totD?totB*8/totD:0,peak=media.length?Math.max(...media.map(m=>m.kbps)):0;
+  out.push({v:fmtKbps(avg),l:'Measured throughput',s:media.length+' segments · peak '+fmtKbps(peak),cls:'good'});
+  const estK=estimates.map(e=>e.kbps);
+  if(estK.length){
+    const ea=estK.reduce((a,b)=>a+b,0)/estK.length;
+    out.push({v:fmtKbps(ea),l:'ABR estimate (avg)',s:'min '+fmtKbps(Math.min(...estK))+' · max '+fmtKbps(Math.max(...estK)),cls:'acc'});
+  }
+  const vRungs = ctxVRungs || computeVRungs(quality[2]||[], full);
+  const vSwitches = ctxVSwitches || computeVSwitches(vRungs);
+  const switchN = vSwitches.length;
+  const firstV = vRungs.length ? vRungs[0] : null;
+  const lastV = vRungs.length ? vRungs[vRungs.length-1] : null;
+  let qualSubtitle = 'No video track';
+  if (vRungs.length === 1) {
+    qualSubtitle = `Constant ${firstV.h > 0 ? firstV.h + 'p ' : ''}${fmtKbpsInt(firstV.kbps)}`;
+  } else if (vRungs.length > 1 && firstV && lastV) {
+    qualSubtitle = `${firstV.h > 0 ? firstV.h + 'p ' : ''}${fmtKbpsInt(firstV.kbps)} → ${lastV.h > 0 ? lastV.h + 'p ' : ''}${fmtKbpsInt(lastV.kbps)}`;
+  }
+  out.push({
+    v: switchN + ' switch' + (switchN === 1 ? '' : 'es'),
+    l: 'Quality ladder',
+    s: qualSubtitle,
+    cls: switchN > 1 ? 'warn' : (switchN === 1 ? 'good' : ''),
+    type: 'quality'
+  });
+  const maxBuf=bufferSamples.length?Math.max(...bufferSamples.map(b=>b.v)):0;
+  out.push({v:fmtDur(maxBuf),l:'Max buffer depth',s:bufferSamples.length+' samples',cls:maxBuf>10000?'good':''});
+  out.push({v:fmtBytes(loads.reduce((a,b)=>a+b.bytes,0)),l:'Bytes downloaded',s:loads.length+' requests ('+loads.filter(l=>l.dataType==='media').length+' segments)'});
+  const vd=evs.find(e=>e.event==='VideoDecoderInitialized'),ad=evs.find(e=>e.event==='AudioDecoderInitialized');
+  out.push({v:vd?shortUri(String(vd.details?.decoder||'')).replace(/c2\./,''):'—',l:'Video decoder',s:vd?('init '+fmtDur(vd.details?.initializationDurationMs)):'',cls:'acc'});
+  out.push({v:String(seeks.length),l:'Seeks',s:seeks.length?('last @'+fmtDur(seeks[seeks.length-1].t-t0)):'none',cls:seeks.length?'warn':''});
+  if(drops>0)out.push({v:fmtDur(drops/30*1000)+' est',l:'Dropped frames',s:drops+' frames · 30fps estimate',cls:'warn'});
+  else if(drops===0&&evs.some(e=>e.event==='DroppedFrames'))out.push({v:'0',l:'Dropped frames',s:'no drops',cls:'good'});
+  if(underruns>0)out.push({v:String(underruns),l:'Audio underruns',s:'audio sink starved',cls:'bad'});
+  if(errors.length>0){
+    const errCounts={};
+    for(const e of errors){
+      const n=e.event||'Error';
+      errCounts[n]=(errCounts[n]||0)+1;
+    }
+    const parts=Object.entries(errCounts).map(([n,c])=>c>1?`${c}× ${n}`:n);
+    out.push({
+      v: String(errors.length),
+      l: 'Errors',
+      s: parts.join(', '),
+      cls: 'bad',
+      type: 'errors'
+    });
+  }
+  if(drmReady)out.push({v:fmtDur(drmReady.rel-t0),l:'DRM keys ready',s:'keys loaded @'+fmtDur(drmReady.rel-t0),cls:'acc'});
+  const det=[];
+  const sse=evs.find(e=>e.event==='SessionStart');
+  const sd=sse?.details||{};
+  if(sd.device)det.push(sd.device);
+  if(sd.android)det.push('Android '+sd.android);
+  out.push({v:det.join(' · ')||'—',l:'Device',s:(s.packageName||'').split('.').pop()||'',cls:''});
+  return out;
+}
+
+/* ═══════════════════════════ PANEL SETUP ═══════════════════════════ */
+function addPanel(label,sub,height,drawFn,scrollable){
+  const row=document.createElement('div');row.className='panel';
+  const lb=document.createElement('div');lb.className='plabel';
+  lb.innerHTML='<span>'+label+'</span>'+(sub?'<span class="sub">'+sub+'</span>':'');
+  const wrap=document.createElement('div');wrap.className=scrollable?'scrollwrap':'pwrap';
+  const cv=document.createElement('canvas');cv.dataset.panel=panels.length;
+  wrap.appendChild(cv);row.appendChild(lb);row.appendChild(wrap);
+  stackEl.appendChild(row);
+  const p={label,sub,height,draw:drawFn,scrollable,canvas:cv,wrap};
+  panels.push(p);return p;
+}
+function fitCanvas(cv,h){
+  const dpr=window.devicePixelRatio||1;
+  const cw=cv.parentElement.clientWidth,ch=h||cv.parentElement.clientHeight;
+  cv.width=Math.max(1,Math.round(cw*dpr));cv.height=Math.max(1,Math.round(ch*dpr));
+  cv.style.height=ch+'px';
+  cv._w=cw;cv._h=ch;cv._dpr=dpr;
+  const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  return ctx;
+}
+function allCanvasW(){return W||1200}
+function layoutPanels(){
+  if(!stackEl.clientWidth)return;
+  W=Math.max(300,stackEl.clientWidth-105);
+  minimapEl.width=Math.round(W*(window.devicePixelRatio||1));
+  minimapEl._w=W;
+  for(const p of panels){
+    let h=p.height;
+    if(p==evtPanel){const rows=Object.keys(S.categories).filter(c=>!S.hiddenCats.has(c)).length;h=Math.max(40,rows*ROWH);}
+    fitCanvas(p.canvas,h);
+  }
+  redraw();
+}
+function tickStep(range){
+  for(const c of[20,50,100,200,500,1000,2000,5000,10000,20000,50000,100000,250000,500000,1000000,2500000,5000000])
+    if(c/(range||1)*allCanvasW()>=65)return c;
+  return 5000000;
+}
+const xOf=t=>(t-S.view.v0)/(S.view.v1-S.view.v0)*allCanvasW();
+const vOf=range=>range*(S.view.v1-S.view.v0)/allCanvasW();
+
+/* ═══════════════════════════ DRAWING ═══════════════════════════ */
+let rafPending=false;
+function redraw(){
+  if(rafPending)return;rafPending=true;
+  requestAnimationFrame(()=>{rafPending=false;
+    const st=S;
+    for(const p of panels){const ctx=p.canvas.getContext('2d');
+      const cw=p.canvas._w,ch=p.canvas._h;if(!cw||!ch)continue;
+      ctx.clearRect(0,0,cw,ch);
+      ctx.fillStyle='#11151c';ctx.fillRect(0,0,cw,ch);
+      if(S.hoverT!=null)drawCursorBand(ctx,cw,ch);
+      drawGrid(ctx,cw,ch);
+      if(S.showStalls)drawStalls(ctx,cw,ch);
+      p.draw(ctx,cw,ch);
+      drawSelectionMarks(ctx,cw,ch,p);
+      drawPlayhead(ctx,cw,ch);
+    }
+    drawMinimap();
+    updateStatus();
+  });
+}
+function drawGrid(ctx,W,H){
+  const step=tickStep(S.view.v1-S.view.v0);
+  ctx.strokeStyle='rgba(255,255,255,0.035)';ctx.fillStyle='#484f58';
+  ctx.font='8px ui-monospace,monospace';ctx.textAlign='center';ctx.textBaseline='bottom';
+  const x0=Math.ceil(S.view.v0/step)*step;
+  for(let t=x0;t<=S.view.v1;t+=step){
+    const x=xOf(t);if(x<0||x>W)continue;
+    ctx.beginPath();ctx.moveTo(x+0.5,0);ctx.lineTo(x+0.5,H);ctx.stroke();
+  }
+}
+function drawCursorBand(ctx,W,H){
+  if(S.sel&&S.sel.type==='stall')return;
+  if(S.hoverT!=null){const x=xOf(S.hoverT);ctx.fillStyle='rgba(88,166,255,0.05)';ctx.fillRect(Math.floor(x)-1,0,3,H)}
+}
+function drawStalls(ctx,W,H){
+  for(const st of S.stalls){
+    const x0=xOf(st.start),x1=xOf(st.end);if(x1<0||x0>W)continue;
+    ctx.fillStyle='rgba(218,54,51,0.10)';ctx.fillRect(Math.max(0,x0),0,Math.min(W,x1)-Math.max(0,x0),H);
+    ctx.fillStyle='rgba(218,54,51,0.5)';
+    for(let x=Math.max(0,x0);x<Math.min(W,x1);x+=6){ctx.fillRect(x,0,2,H)}
+  }
+}
+function drawPlayhead(ctx,W,H){
+  if(S.playT==null&&S.sel&&S.sel.type!=='stall'){return}
+  const t=S.playT!=null?S.playT:(S.hoverT!=null?S.hoverT:null);
+  if(t==null)return;
+  if(S.sel&&S.sel.type==='stall'){return}
+  const x=xOf(t);if(x<0||x>W)return;
+  ctx.strokeStyle=S.playT!=null?'rgba(227,179,65,0.9)':'rgba(88,166,255,0.35)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(x+0.5,0);ctx.lineTo(x+0.5,H);ctx.stroke();
+  if(S.playT!=null){ctx.fillStyle='#e3b341';ctx.beginPath();ctx.arc(x,H/2,3,0,7);ctx.fill()}
+}
+function drawSelectionMarks(ctx,W,H,p){
+  const sel=S.sel;if(!sel)return;
+  if(sel.type==='event'){
+    const e=S.events[sel.idx];if(!e)return;
+    if(p===evtPanel){
+      const rows=visibleRows();const y=rows.indexOf(e.cat);
+      const yy=y>=0?y*ROWH+ROWH/2:0;
+      ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(xOf(e.rel),yy,6,0,7);ctx.stroke();
+      ctx.strokeStyle='rgba(255,255,255,0.6)';
+      ctx.beginPath();ctx.moveTo(xOf(e.rel)+0.5,0);ctx.lineTo(xOf(e.rel)+0.5,H);ctx.stroke();
+    }
+  }else if(sel.type==='load'){
+    const l=S.loads[sel.idx];if(!l)return;
+    if(p===netPanel){
+      const lane=Math.min(l.lane,LANE_DEFS.length-1),yh=lane*19+2;
+      ctx.strokeStyle='#fff';ctx.lineWidth=1.5;
+      ctx.strokeRect(xOf(l.start)-2,yh-2,Math.max(4,xOf(l.end)-xOf(l.start)+4),17);
+    }
+    if(p!==netPanel){ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.beginPath();ctx.moveTo(xOf(l.start)+0.5,0);ctx.lineTo(xOf(l.start)+0.5,H);ctx.stroke()}
+  }else if(sel.type==='stall'){
+    const st=S.stalls[sel.idx];if(!st)return;
+    const x0=xOf(st.start),x1=xOf(st.end);
+    ctx.fillStyle='rgba(218,54,51,0.18)';ctx.fillRect(Math.max(0,x0),0,Math.min(W,x1)-Math.max(0,x0),H);
+    ctx.strokeStyle='#f78166';ctx.setLineDash([4,3]);ctx.strokeRect(Math.max(0,x0)+0.5,0.5,Math.min(W,x1)-Math.max(0,x0)-1,H-1);ctx.setLineDash([]);
+  }
+}
+
+/* ── panels ── */
+let evtPanel,netPanel,stStatePanel,stQualPanel,stBufPanel,stBwPanel,stBrainPanel,stStartupPanel;
+const BRAIN_COLORS={preparing:'#8b949e',selecting:'#bc4c8f',drm:'#f78166',buffering:'#d29922',playing:'#3fb950',rebuffer:'#da3633',seeking:'#e3b341',paused:'#6e7681',idle:'#30363d'};
+const BRAIN_LABELS={preparing:'PREPARING',selecting:'SELECTING',drm:'DRM',buffering:'INIT BUFFER',playing:'PLAYING',rebuffer:'REBUFFER',seeking:'SEEKING',paused:'PAUSED',idle:'IDLE'};
+function buildPanels(){
+  addPanel('TIME','session · ms',26,(ctx,W,H)=>{
+    const step=tickStep(S.view.v1-S.view.v0);
+    ctx.font='8px ui-monospace,monospace';ctx.textBaseline='middle';
+    for(let t=Math.ceil(S.view.v0/step)*step;t<=S.view.v1;t+=step){
+      const x=xOf(t);if(x<0||x>W)continue;
+      ctx.fillStyle='rgba(255,255,255,0.35)';
+      ctx.fillRect(x-0.5,H-8,1,4);
+      ctx.fillStyle='#8b949e';ctx.textAlign='center';
+      ctx.fillText(t>=1000?(t/1000).toFixed(step>=60000?0:1)+'s':t+'ms',x,4);
+    }
+    ctx.textAlign='right';ctx.fillStyle='#484f58';
+    ctx.fillText('🔍 wheel / pinch / +−',W-4,H-2);
+  });
+  stStatePanel=addPanel('STATE','playback',54,(ctx,W,H)=>{
+    const top=4,midY=H/2-7;
+    /* play segments */
+    for(const ps of S.playSegs){
+      const x0=xOf(ps.start),x1=xOf(ps.end);if(x1<0||x0>W)continue;
+      ctx.fillStyle='rgba(63,185,80,0.18)';ctx.fillRect(Math.max(0,x0),top,Math.min(W,x1)-Math.max(0,x0),H-top-18);
+    }
+    if(S.startup){
+      const x0=xOf(S.startup.start),x1=xOf(S.startup.end);
+      ctx.fillStyle='rgba(210,153,34,0.16)';ctx.fillRect(Math.max(0,x0),top,Math.max(0,Math.min(W,x1)-Math.max(0,x0)),H-top-18);
+      ctx.fillStyle='#d29922';ctx.font='7px ui-monospace';ctx.textBaseline='top';
+      if(x1-x0>40)ctx.fillText('STARTUP',Math.max(2,x0+3),6);
+    }
+    /* stalls */
+    for(const st of S.stalls){
+      const x0=xOf(st.start),x1=xOf(st.end);if(x1<0||x0>W)continue;
+      ctx.fillStyle='rgba(218,54,51,0.5)';ctx.fillRect(Math.max(0,x0),top,Math.max(2,Math.min(W,x1)-Math.max(0,x0)),H-top-18);
+      ctx.fillStyle='#ffa198';ctx.font='7px ui-monospace';ctx.textBaseline='top';
+      if(x1-x0>46)ctx.fillText('REBUFFER',Math.max(2,x0+3),6);
+    }
+    /* READY + FIRST FRAME vertical lines */
+    if(S.firstReady!=null){
+      const x=xOf(S.firstReady);if(x>=0&&x<=W){
+        ctx.strokeStyle='rgba(63,185,80,0.75)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x+0.5,top);ctx.lineTo(x+0.5,H-18);ctx.stroke();ctx.setLineDash([]);
+        ctx.fillStyle='#3fb950';ctx.font='7px ui-monospace';ctx.textBaseline='top';ctx.textAlign='center';ctx.fillText('READY',x,top);
+      }
+    }
+    if(S.firstFrame){
+      const x=xOf(S.firstFrame.rel);if(x>=0&&x<=W){
+        ctx.strokeStyle='rgba(88,166,255,0.8)';ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(x+0.5,top);ctx.lineTo(x+0.5,H-18);ctx.stroke();ctx.setLineDash([]);
+        ctx.fillStyle='#58a6ff';ctx.font='7px ui-monospace';ctx.textBaseline='top';ctx.textAlign='center';ctx.fillText('1ST FRAME',x,top);
+      }
+    }
+    /* markers */
+    for(const m of S.markers){
+      const x=xOf(m.t);if(x<0||x>W)continue;
+      ctx.font='9px ui-monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+      const sym={play:'▶',pause:'⏸',end:'■',seek:'⤳',firstframe:'☆',release:'◈',drmrel:'✕',qswitch:'⇄'}[m.type]||'•';
+      const col={play:'#3fb950',pause:'#d29922',end:'#bc4c8f',seek:'#e3b341',firstframe:'#58a6ff',release:'#6e7681',drmrel:'#f78166',qswitch:'#8957e5'}[m.type]||'#8b949e';
+      ctx.fillStyle=col;ctx.fillText(sym,x,midY+2);
+      if(x<xOf(S.view.v1)-34&&m.type==='seek'){ctx.textAlign='left';ctx.fillStyle='#e3b341';ctx.font='6.5px ui-monospace';ctx.fillText('SEEK',x+2,midY+2)}
+    }
+    /* legend */
+    ctx.textAlign='left';ctx.textBaseline='middle';ctx.font='7.5px ui-monospace';
+    ctx.fillStyle='#6e7681';ctx.fillText('legend: ',3,H-9);
+    let lx=40;
+    const leg=[['▶','play','#3fb950'],['⏸','pause','#d29922'],['⤳','seek','#e3b341'],['☆','1st frame','#58a6ff'],['■','ended','#bc4c8f'],['⇄','quality','#8957e5'],['✕','drm rel','#f78166'],['◈','release','#6e7681']];
+    for(const[g,lab,col]of leg){
+      ctx.fillStyle=col;ctx.fillText(g,lx,H-9);const w=ctx.measureText(g).width;
+      ctx.fillStyle='#8b949e';ctx.fillText(lab,lx+w+2,H-9);
+      lx+=w+2+ctx.measureText(lab).width+14;
+    }
+  });
+  stBrainPanel=addPanel('BRAIN','player intent',26,(ctx,W,H)=>{
+    const y=4,h=18;
+    for(const ph of S.brainPhases||[]){
+      const x0=xOf(ph.start),x1=xOf(ph.end);if(x1<0||x0>W)continue;
+      const c=BRAIN_COLORS[ph.kind]||'#30363d';
+      ctx.fillStyle=c+'cc';
+      ctx.fillRect(Math.max(0,x0),y,Math.max(1,Math.min(W,x1)-Math.max(0,x0)),h);
+      if(x1-x0>34&&ph.kind!=='idle'){
+        ctx.fillStyle=ph.kind==='rebuffer'||ph.kind==='seeking'||ph.kind==='buffering'?'#0d1117':'#e6edf3';
+        ctx.font='6.5px ui-monospace';ctx.textBaseline='middle';ctx.textAlign='left';
+        ctx.fillText(BRAIN_LABELS[ph.kind],Math.max(2,x0+3),y+h/2+1);
+      }
+    }
+    ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.strokeRect(0,y,W,h);
+  });
+  stStartupPanel=addPanel('STARTUP','wait vs work',44,(ctx,W,H)=>{
+    const y=6,h=13;
+    const stages=(S.startupStages||[]).filter(s=>s.dur>1);
+    if(!stages.length){ctx.fillStyle='#484f58';ctx.font='8px ui-monospace';ctx.textBaseline='middle';ctx.fillText('no startup stages (needs timeline/decoder events)',4,H/2+1);return}
+    for(const st of stages){
+      const x0=xOf(st.start),x1=xOf(st.end);if(x1<0||x0>W)continue;
+      ctx.fillStyle=st.color+'bb';
+      ctx.fillRect(Math.max(0,x0),y,Math.max(1.5,Math.min(W,x1)-Math.max(0,x0)),h);
+      if(S.blocking===st){ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(Math.max(0,x0)+0.5,y+0.5,Math.max(1.5,Math.min(W,x1)-Math.max(0,x0))-1,h-1)}
+      if(x1-x0>40){
+        ctx.fillStyle='#e6edf3';ctx.font='7px ui-monospace';ctx.textBaseline='middle';ctx.textAlign='left';
+        ctx.fillText(st.name,Math.max(3,x0+3),y+h/2+1);
+      }
+    }
+    if(S.firstReady!=null){const x=xOf(S.firstReady);ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x+0.5,2);ctx.lineTo(x+0.5,H-2);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#e6edf3';ctx.font='7px ui-monospace';ctx.textBaseline='top';ctx.textAlign='center';ctx.fillText('READY',x,0)}
+    if(S.firstFrame){const x=xOf(S.firstFrame.rel);ctx.fillStyle='#58a6ff';ctx.font='7px ui-monospace';ctx.textBaseline='top';ctx.textAlign='center';ctx.fillText('FIRST FRAME',x,0)}
+  });
+  addPanel('QUALITY','bitrate ladder',68,(ctx,W,H)=>{
+    const yT=6,yA=34,rowH=20;
+    ctx.font='8px ui-monospace';ctx.textBaseline='middle';
+    const maxQ=Math.max(2000,...(S.quality[2]||[]).map(s=>s.kbps),800);
+    for(const tt of[2,1]){
+      const steps=S.quality[tt]||[],y=tt===2?yT:yA;
+      ctx.fillStyle='#6e7681';ctx.fillText(tt===2?'VIDEO':'AUDIO',2,y+rowH/2);
+      if(!steps.length)continue;
+      let hue=0;
+      for(const st of steps){
+        hue=st.kbps/maxQ;
+        const x0=xOf(st.t),x1=xOf(st.end);
+        ctx.fillStyle=tt===2?`rgba(31,111,235,${0.25+hue*0.65})`:`rgba(63,185,80,0.45)`;
+        ctx.fillRect(Math.max(0,x0),y,Math.max(1,Math.min(W,x1)-Math.max(0,x0)),rowH);
+      }
+      ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.strokeRect(0,y,W,rowH);
+      for(const st of steps){
+        const x0=xOf(st.t),x1=xOf(st.end);
+        if(x1-x0>54){
+          ctx.fillStyle='#fff';
+          const label=(st.h>0?st.h+'p · ':'')+fmtKbpsInt(st.kbps);
+          const tw=ctx.measureText(label).width;
+          if(tw+6<x1-x0){ctx.textAlign='left';ctx.fillText(label,Math.max(3,x0+3),y+rowH/2+1)}
+        }
+      }
+    }
+    /* footer: quality switch note + legend (own strip, no overlap) */
+    ctx.fillStyle='rgba(22,27,34,0.8)';ctx.fillRect(0,60,W,8);
+    const ff=S.markers.find(m=>m.type==='qswitch');
+    if(ff){
+      const note='⇄ quality ↑ '+fmtKbpsInt(ff.to)+' @'+fmtDur(ff.t-S.events[0]?.rel);
+      ctx.textAlign='left';ctx.fillStyle='#d2a8ff';ctx.font='7px ui-monospace';ctx.textBaseline='middle';
+      ctx.fillText(note,4,64);
+    }
+    ctx.textAlign='right';ctx.fillStyle='#6e7681';ctx.font='7px ui-monospace';
+    ctx.fillText('blue = video · green = audio',W-4,64);
+  });
+  addPanel('BUFFER','ms of media',62,(ctx,W,H)=>{
+    const pts=S.bufferSamples;
+    ctx.fillStyle='#484f58';ctx.font='8px ui-monospace';ctx.textBaseline='middle';
+    const maxB=Math.max(5000,...pts.map(p=>p.v),2000);
+    ctx.fillStyle='rgba(255,255,255,0.06)';
+    ctx.fillRect(0,H-2,100,1);
+    const yOf=v=>H-4-(Math.min(v,maxB)/maxB)*(H-14);
+    if(pts.length){
+      ctx.beginPath();
+      for(let i=0;i<pts.length;i++){const x=xOf(pts[i].t),y=yOf(pts[i].v);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+      ctx.lineTo(xOf(pts[pts.length-1].t),yOf(0));ctx.lineTo(xOf(pts[0].t),yOf(0));ctx.closePath();
+      const g=ctx.createLinearGradient(0,H,0,0);g.addColorStop(0,'rgba(63,185,80,0.02)');g.addColorStop(1,'rgba(63,185,80,0.30)');
+      ctx.fillStyle=g;ctx.fill();
+      ctx.strokeStyle='#3fb950';ctx.lineWidth=1.5;ctx.beginPath();
+      for(let i=0;i<pts.length;i++){const x=xOf(pts[i].t),y=yOf(pts[i].v);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+      ctx.stroke();
+      ctx.fillStyle='#3fb950';
+      for(const p of pts){const x=xOf(p.t);ctx.beginPath();ctx.arc(x,yOf(p.v),2.2,0,7);ctx.fill()}
+      /* value labels */
+      ctx.font='8px ui-monospace';ctx.fillStyle='#7ee787';
+      for(const p of pts){const x=xOf(p.t);if(x>8&&x<W-8&&p.v>500){ctx.textAlign=x>W-50?'right':'left';ctx.fillText(fmtDur(p.v),x+(x>W-50?-4:4),yOf(p.v)-4)}}
+    }
+    ctx.fillStyle='#484f58';ctx.textAlign='left';
+    ctx.fillText('0',2,H-2);ctx.textAlign='right';ctx.fillText(fmtDur(maxB),W-2,8);
+    ctx.fillStyle='rgba(255,255,255,0.04)';ctx.fillRect(0,yOf(maxB/2),W,1);
+  });
+  addPanel('BANDWIDTH','actual vs ABR est',96,(ctx,W,H)=>{
+    const y0=H-16,ymax=Math.max(3500,...S.loads.map(l=>l.kbps),...(S.estimates.map(e=>e.kbps)),3000);
+    const yOf=k=>y0-(Math.min(k,ymax)/ymax)*(H-30);
+    ctx.fillStyle='#484f58';ctx.font='7px ui-monospace';ctx.textBaseline='middle';
+    ctx.textAlign='left';
+    for(const g of[1000,2000,3000,4000,ymax]){
+      if(g>ymax*0.99)continue;
+      ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.beginPath();ctx.moveTo(0,yOf(g));ctx.lineTo(W,yOf(g));ctx.stroke();
+      ctx.fillStyle='#6e7681';ctx.fillText(fmtKbpsInt(g)+'b',3,yOf(g));
+    }
+    /* actual bars */
+    for(const l of S.loads){
+      if(l.kbps<=0)continue;
+      const x0=xOf(l.start),x1=xOf(l.end);if(x1<0||x0>W)continue;
+      const bw=Math.max(1.5,x1-x0);
+      const col=l.lane===4?'rgba(63,185,80,0.75)':'rgba(31,111,235,0.8)';
+      ctx.fillStyle=col;
+      ctx.fillRect(Math.max(0,x0),yOf(l.kbps),bw,y0-yOf(l.kbps));
+      if(l.slow||l.crit){ctx.strokeStyle=l.crit?'#f78166':'#d29922';ctx.lineWidth=1;ctx.strokeRect(Math.max(0,x0),yOf(l.kbps),bw,y0-yOf(l.kbps))}
+    }
+    /* ABR estimate line */
+    if(S.estimates.length>1){
+      const pts=S.estimates;
+      ctx.beginPath();
+      for(let i=0;i<pts.length;i++){const x=xOf(pts[i].t),y=yOf(pts[i].kbps);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}
+      ctx.strokeStyle='rgba(88,166,255,0.25)';ctx.lineWidth=4;ctx.stroke();
+      ctx.strokeStyle='#58a6ff';ctx.lineWidth=1.4;ctx.stroke();
+      ctx.fillStyle='#58a6ff';
+      for(const p of pts){const x=xOf(p.t);ctx.fillRect(x-1,yOf(p.kbps)-1,2,2)}
+    }
+    /* legend */
+    ctx.font='7.5px ui-monospace';ctx.textBaseline='middle';
+    ctx.fillStyle='#58a6ff';ctx.fillText('━ ABR estimate',6,10);
+    ctx.fillStyle='#1f6feb';ctx.fillRect(110,7,8,6);ctx.fillStyle='#c9d1d9';ctx.fillText('actual video',122,10);
+    ctx.fillStyle='#3fb950';ctx.fillRect(170,7,8,6);ctx.fillStyle='#c9d1d9';ctx.fillText('actual audio',182,10);
+    ctx.fillStyle='#f78166';ctx.fillText('▣ slow',240,10);
+  });
+  netPanel=addPanel('NETWORK','waterfall',118,(ctx,W,H)=>{
+    ctx.font='7px ui-monospace';ctx.textBaseline='middle';ctx.fillStyle='#6e7681';
+    for(let i=0;i<LANE_DEFS.length;i++){
+      const y=i*19;
+      ctx.fillStyle='rgba(255,255,255,0.02)';ctx.fillRect(0,y,W,18);
+      ctx.fillStyle='#6e7681';ctx.textAlign='left';ctx.fillText(LANE_DEFS[i].label,3,y+9);
+    }
+    for(const l of S.loads){
+      const x0=xOf(l.start),x1=xOf(l.end);if(x1<0||x0>W)continue;
+      const y=Math.min(l.lane,LANE_DEFS.length-1)*19+2,bw=Math.max(2,x1-x0);
+      ctx.fillStyle=LANE_DEFS[Math.min(l.lane,LANE_DEFS.length-1)].color+'cc';
+      ctx.fillRect(Math.max(0,x0),y,bw,14);
+      if(l.retried){ctx.fillStyle='#ff5252';ctx.beginPath();ctx.moveTo(Math.max(0,x0)+2,y+1);ctx.lineTo(Math.max(0,x0)+7,y+1);ctx.lineTo(Math.max(0,x0)+4.5,y+6);ctx.closePath();ctx.fill()}
+      if(l.slow||l.crit){ctx.strokeStyle=l.crit?'#f78166':'#d29922';ctx.lineWidth=1;ctx.strokeRect(Math.max(0,x0)+0.5,y+0.5,bw-1,13)}
+    }
+  });
+  evtPanel=addPanel('EVENTS','all categories',40,(ctx,W,H)=>{
+    const rows=visibleRows();
+    ctx.font='7px ui-monospace';ctx.textBaseline='middle';
+    for(let ri=0;ri<rows.length;ri++){
+      const cat=rows[ri],evs=S.categories[cat]||[];
+      const y0=ri*ROWH;
+      ctx.fillStyle='rgba(255,255,255,0.015)';ctx.fillRect(0,y0,W,ROWH);
+      ctx.strokeStyle='rgba(255,255,255,0.03)';ctx.beginPath();ctx.moveTo(0,y0+ROWH);ctx.lineTo(W,y0+ROWH);ctx.stroke();
+      for(const e of evs){
+        const x=xOf(e.rel);if(x<-8||x>W+8)continue;
+        const matched=S.filterText&&evtMatches(e);
+        const dim=S.filterText&&!matched?0.15:0.75;
+        ctx.globalAlpha=dim;
+        if(e.duration>0){
+          ctx.fillStyle=e.color;
+          const w=Math.max(2,xOf(e.rel+e.duration)-x);
+          ctx.fillRect(x,y0+4,Math.min(w,W-x),ROWH-8);
+        }else{
+          ctx.fillStyle=e.color;
+          ctx.fillRect(x-1.5,y0+5,3,ROWH-10);
+          if(matched){ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.strokeRect(x-3,y0+3,7,ROWH-6)}
+        }
+        ctx.globalAlpha=1;
+      }
+    }
+  });
+}
+
+function visibleRows(){return CAT_ORDER.filter(c=>(S.categories[c]||[]).length>0&&!S.hiddenCats.has(c))}
+function evtMatches(e){
+  const q=S.filterText.toLowerCase();
+  if(!q)return true;
+  const d=e.details||{};
+  return String(e.event||'').toLowerCase().includes(q)||String(e.category||'').toLowerCase().includes(q)
+    ||String(e.cat||'').toLowerCase().includes(q)||String(d.uri||'').toLowerCase().includes(q)
+    ||String(d.decoder||'').toLowerCase().includes(q)||String(d.mimeType||'').toLowerCase().includes(q)
+    ||String(d.codecs||'').toLowerCase().includes(q)||String(d.dataType||'').toLowerCase().includes(q);
+}
+
+/* ── minimap ── */
+function drawMinimap(){
+  const cv=minimapEl,ctx=cv.getContext('2d');
+  const cw=W,ch=cv._h=cv.clientHeight||44;
+  ctx.setTransform((window.devicePixelRatio||1),0,0,(window.devicePixelRatio||1),0,0);
+  ctx.clearRect(0,0,cw,ch);
+  ctx.fillStyle='#0d1117';ctx.fillRect(0,0,cw,ch);
+  const range=S.fullRange,nb=200,bins=new Array(nb).fill(0);
+  for(const e of S.events){const b=Math.floor(e.rel/range*nb);if(b>=0&&b<nb)bins[b]++}
+  const max=Math.max(1,...bins);
+  ctx.strokeStyle='#2a3442';
+  ctx.beginPath();
+  for(let i=0;i<nb;i++){const x=i/nb*cw,y=ch-2-bins[i]/max*(ch-8);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+  ctx.lineTo(cw,ch);ctx.lineTo(0,ch);ctx.closePath();
+  ctx.fillStyle='rgba(88,166,255,0.10)';ctx.fill();
+  for(const st of S.stalls){ctx.fillStyle='rgba(218,54,51,0.8)';ctx.fillRect(st.start/range*cw,0,Math.max(1,st.end/range*cw-st.start/range*cw),ch)}
+  ctx.strokeStyle='rgba(255,255,255,0.85)';ctx.lineWidth=1;
+  const x0=S.view.v0/range*cw,x1=S.view.v1/range*cw;
+  ctx.strokeRect(x0+0.5,0.5,Math.max(3,x1-x0)-1,ch-1);
+  ctx.fillStyle='rgba(88,166,255,0.08)';ctx.fillRect(x0,0,x1-x0,ch);
+}
+
+/* ═══════════════════════════ HEADER / KPI / CHIPS ═══════════════════════════ */
+function renderHeader(){
+  const s=S.session;
+  const start=new Date(s.startedAtEpochMs||Date.now());
+  $('meta').textContent=`${s.packageName||'?'} · ${s.id||''} · started ${start.toLocaleString()} · schema ${S.raw.schemaVersion||'?'} · ${S.events.length} events`;
+  const renderKpiValue=value=>{
+    const text=String(value??'');
+    const m=text.match(/^(\d[\d.,]*)\s+(ms|s|sec|Mbps|kbps|MB|GB)$/i);
+    return m?`${esc(m[1])}<span class="unit">${esc(m[2])}</span>`:esc(text);
+  };
+  kpisEl.innerHTML=S.kpis.map((k,i)=>{
+    const hasPop = (k.type === 'errors' || k.type === 'quality');
+    const hint = hasPop ? `<span class="pop-hint">details ▾</span>` : '';
+    return `<div class="kpi ${k.cls||''}${hasPop ? ' has-pop' : ''}" data-kpi-type="${esc(k.type||'')}" data-kpi-idx="${i}">
+      <div class="v" data-full="${esc([k.v,k.s].filter(Boolean).join(' · '))}">${renderKpiValue(k.v)}</div>
+      <div class="l">${esc(k.l)}${hint}</div>
+      <div class="s" title="${esc(k.s||'')}">${esc(k.s||'')}</div>
+    </div>`;
+  }).join('');
+  requestAnimationFrame(()=>{
+    kpisEl.querySelectorAll('.kpi .v').forEach(v=>{
+      const clipped=v.scrollWidth>v.clientWidth;
+      if(clipped){v.title=v.dataset.full||'';v.classList.add('truncated')}
+      else{v.removeAttribute('title');v.classList.remove('truncated')}
+    });
+
+    kpisEl.querySelectorAll('.kpi.has-pop').forEach(kpiEl=>{
+      const type = kpiEl.dataset.kpiType;
+      kpiEl.addEventListener('mouseenter',()=>{
+        clearTimeout(popTimer);
+        if(popPinned && activePopType === type) return;
+        popPinned = false;
+        let html = '';
+        if(type === 'errors') html = renderErrorsPopover();
+        else if(type === 'quality') html = renderQualityPopover();
+        if(html){
+          activePopType = type;
+          showKpiPop(kpiEl, html);
+          attachPopHandlers(type);
+        }
+      });
+      kpiEl.addEventListener('mouseleave',()=>{
+        if(!popPinned){
+          popTimer = setTimeout(closeKpiPop, 250);
+        }
+      });
+      kpiEl.addEventListener('click',(ev)=>{
+        if(activePopType === type && popPinned){
+          forceCloseKpiPop();
+        } else {
+          clearTimeout(popTimer);
+          let html = '';
+          if(type === 'errors') html = renderErrorsPopover();
+          else if(type === 'quality') html = renderQualityPopover();
+          if(html){
+            activePopType = type;
+            popPinned = true;
+            showKpiPop(kpiEl, html);
+            attachPopHandlers(type);
+          }
+        }
+        ev.stopPropagation();
+      });
+    });
+  });
+  const cats=CAT_ORDER.filter(c=>(S.categories[c]||[]).length>0);
+  chipsEl.innerHTML=cats.map(c=>{
+    const col=CAT_COLORS[c];
+    return `<span class="chip${S.hiddenCats.has(c)?' hidden':''}" data-cat="${c}" style="border-left:3px solid ${col}">${CAT_LABELS[c]||c.toUpperCase()} <span class="n">${S.categories[c].length}</span></span>`;
+  }).join('');
+  chipsEl.querySelectorAll('.chip').forEach(ch=>ch.addEventListener('click',()=>{
+    const c=ch.dataset.cat;
+    if(S.hiddenCats.has(c))S.hiddenCats.delete(c);else S.hiddenCats.add(c);
+    ch.classList.toggle('hidden');
+    layoutPanels();
+    updateStatus();
+  }));
+}
+
+/* ═══════════════════════════ KPI POPOVER ═══════════════════════════ */
+let activePopType = null;
+let popPinned = false;
+let popTimer = null;
+
+function closeKpiPop(){
+  if(popPinned) return;
+  if(kpiPopEl) kpiPopEl.style.display = 'none';
+  activePopType = null;
+}
+
+function forceCloseKpiPop(){
+  popPinned = false;
+  clearTimeout(popTimer);
+  if(kpiPopEl) kpiPopEl.style.display = 'none';
+  activePopType = null;
+}
+
+function showKpiPop(targetEl, html){
+  if(!kpiPopEl) return;
+  kpiPopEl.innerHTML = html;
+  kpiPopEl.style.display = 'flex';
+  const r = targetEl.getBoundingClientRect();
+  const popW = Math.min(520, Math.max(340, window.innerWidth - 32));
+  kpiPopEl.style.width = popW + 'px';
+
+  let left = r.left;
+  if(left + popW > window.innerWidth - 16){
+    left = Math.max(16, window.innerWidth - 16 - popW);
+  }
+
+  const popH = kpiPopEl.offsetHeight || 320;
+  let top = r.bottom + 8;
+  if(top + popH > window.innerHeight - 16 && r.top > popH + 16){
+    top = r.top - popH - 8;
+  }
+  kpiPopEl.style.left = Math.max(16, Math.round(left)) + 'px';
+  kpiPopEl.style.top = Math.max(16, Math.round(top)) + 'px';
+}
+
+function renderErrorsPopover(){
+  const errs = S.errors || [];
+  if(!errs.length) return '';
+  const errCounts = {};
+  for(const e of errs) errCounts[e.event || 'Error'] = (errCounts[e.event || 'Error'] || 0) + 1;
+
+  const msgs = errs.map(e => e.details?.message || e.details?.errorCodeName || '').filter(Boolean);
+  const commonMsg = msgs[0] || '';
+
+  let html = `
+    <div class="kpi-pop-head">
+      <div class="kpi-pop-title">
+        <span style="color:#f85149">⚠️</span> Playback Errors (${errs.length})
+        <span class="kpi-pop-badge bad">Critical</span>
+      </div>
+      <span style="font-size:0.65rem;color:#8b949e">first @ +${fmtDur(errs[0].rel - (S.events[0]?.rel || 0))}</span>
+    </div>
+    <div class="kpi-pop-body">
+      <div class="kpi-pop-chips">
+        ${Object.entries(errCounts).map(([k,v]) => `<span class="kpi-pop-chip bad">${v}× ${esc(k)}</span>`).join('')}
+      </div>
+  `;
+
+  if(commonMsg){
+    html += `
+      <div style="background:rgba(248,81,73,0.08);border:1px solid rgba(248,81,73,0.25);border-radius:8px;padding:8px 10px;font-size:0.68rem;color:#ff7b72;line-height:1.4">
+        <b>Primary cause:</b> ${esc(commonMsg.slice(0, 160))}${commonMsg.length > 160 ? '…' : ''}
+      </div>
+    `;
+  }
+
+  html += `<div style="font-size:0.65rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:0.05em;margin-top:2px">Error Event Feed (${errs.length})</div>`;
+  html += `<div style="display:flex;flex-direction:column;gap:6px">`;
+
+  const baseT = S.events[0]?.rel || 0;
+  errs.forEach((e, idx) => {
+    const d = e.details || {};
+    const errCode = d.errorCodeName || (d.errorCode != null ? 'CODE ' + d.errorCode : '');
+    const msg = d.message || d.error || '';
+    const uri = d.uri ? shortUri(d.uri) : '';
+    const relSec = '+' + fmtDur(e.rel - baseT);
+    html += `
+      <div class="kpi-err-item" data-evt-idx="${e.idx}" title="Click to view details in inspector">
+        <div class="kpi-err-header">
+          <span class="kpi-err-name">#${idx+1} ${esc(e.event || 'Error')}</span>
+          <span class="kpi-err-time">${esc(relSec)}</span>
+        </div>
+        ${errCode ? `<div class="kpi-err-code">${esc(errCode)}</div>` : ''}
+        ${msg ? `<div class="kpi-err-msg">${esc(msg.slice(0, 180))}${msg.length > 180 ? '…' : ''}</div>` : ''}
+        ${uri ? `<div style="font-size:0.63rem;color:#79c0ff;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🔗 ${esc(uri)}</div>` : ''}
+      </div>
+    `;
+  });
+
+  html += `</div></div>`;
+  html += `
+    <div class="kpi-pop-foot">
+      <span>💡 Click any error to inspect in drawer</span>
+      <button class="mini-btn" id="btnPopViewAllErrors" style="border-color:#da3633;color:#ffa198">Open in Table ➔</button>
+    </div>
+  `;
+  return html;
+}
+
+function renderQualityPopover(){
+  const rungs = S.vRungs || [];
+  const switches = S.vSwitches || [];
+  const full = S.fullRange || 1;
+  const t0 = S.events[0]?.rel || 0;
+  const audioTracks = S.quality[1] || [];
+
+  const peakRung = rungs.reduce((best, r) => (!best || r.kbps > best.kbps) ? r : best, null);
+  const startRung = rungs[0] || null;
+  const upgrades = switches.filter(s => s.isUpgrade).length;
+  const downgrades = switches.filter(s => !s.isUpgrade).length;
+
+  let html = `
+    <div class="kpi-pop-head">
+      <div class="kpi-pop-title">
+        <span style="color:#79c0ff">📈</span> Quality Ladder & Adaptation
+        <span class="kpi-pop-badge ${switches.length > 1 ? 'warn' : (switches.length === 1 ? 'good' : 'acc')}">
+          ${switches.length} ${switches.length === 1 ? 'switch' : 'switches'}
+        </span>
+      </div>
+      <span style="font-size:0.65rem;color:#8b949e">${rungs.length} tier${rungs.length === 1 ? '' : 's'} observed</span>
+    </div>
+    <div class="kpi-pop-body">
+      <!-- Summary metrics grid -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#151821;border:1px solid #242b38;border-radius:8px;padding:8px 10px;text-align:center">
+        <div>
+          <div style="font-size:0.6rem;color:#8b949e;text-transform:uppercase">Initial Rung</div>
+          <div style="font-size:0.85rem;font-weight:700;color:#c9d1d9;margin-top:2px">
+            ${startRung ? `${startRung.h ? startRung.h+'p' : ''} ${fmtKbpsInt(startRung.kbps)}` : '—'}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:0.6rem;color:#8b949e;text-transform:uppercase">Peak Quality</div>
+          <div style="font-size:0.85rem;font-weight:700;color:#7ee787;margin-top:2px">
+            ${peakRung ? `${peakRung.h ? peakRung.h+'p' : ''} ${fmtKbpsInt(peakRung.kbps)}` : '—'}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:0.6rem;color:#8b949e;text-transform:uppercase">Adaptation</div>
+          <div style="font-size:0.85rem;font-weight:700;color:${downgrades ? '#ffa198' : '#79c0ff'};margin-top:2px">
+            ${upgrades}↑ ${downgrades ? `${downgrades}↓` : ''}
+          </div>
+        </div>
+      </div>
+  `;
+
+  // Visual stepped timeline bar
+  if(rungs.length > 0){
+    html += `
+      <div style="margin-top:4px">
+        <div style="display:flex;justify-content:space-between;font-size:0.63rem;color:#8b949e;margin-bottom:4px">
+          <span>Quality progression over session</span>
+          <span>${fmtDur(full)} total</span>
+        </div>
+        <div class="ql-ladder-bar">
+    `;
+    const totalD = rungs.reduce((acc, r) => acc + (r.dur || 0), 0) || full;
+    rungs.forEach((r, idx) => {
+      const pct = Math.max(8, ((r.dur || 0) / totalD * 100));
+      const label = `${r.h ? r.h + 'p ' : ''}${fmtKbpsInt(r.kbps)}`;
+      const rungClass = 'rung-' + (1 + (idx % 4));
+      html += `
+        <div class="ql-segment ${rungClass}" style="flex:${pct}" title="${label} · ${fmtDur(r.dur)} (${pct.toFixed(0)}%)">
+          ${label} (${pct.toFixed(0)}%)
+        </div>
+      `;
+    });
+    html += `</div></div>`;
+  }
+
+  // Switches / Rungs table
+  html += `
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.65rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">
+        <span>${switches.length ? `Switches & Transitions (${switches.length})` : 'Active Quality Rung'}</span>
+        <span style="font-weight:400;color:#6e7681">Click Jump to center timeline</span>
+      </div>
+      <table class="ql-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Quality Transition</th>
+            <th>Bitrate</th>
+            <th>Duration</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+
+  if(switches.length === 0 && rungs.length > 0){
+    const r = rungs[0];
+    html += `
+      <tr class="ql-row">
+        <td style="font-family:ui-monospace;color:#8b949e">+${fmtDur(r.t - t0)}</td>
+        <td><b style="color:#79c0ff">${r.h ? r.h + 'p' : 'Video'}</b> <span style="font-size:0.62rem;color:#8b949e">${esc(r.codecs || r.mime || '')}</span></td>
+        <td>${fmtKbpsInt(r.kbps)}</td>
+        <td>${fmtDur(r.dur)} (100%)</td>
+        <td><span style="color:#7ee787;font-size:0.65rem">Stable</span></td>
+      </tr>
+    `;
+  } else {
+    if(startRung){
+      html += `
+        <tr class="ql-row" data-time="${startRung.t}" data-idx="${startRung.idx||''}">
+          <td style="font-family:ui-monospace;color:#8b949e">+${fmtDur(startRung.t - t0)}</td>
+          <td><b>Initial: ${startRung.h ? startRung.h + 'p' : 'Video'}</b> <span style="font-size:0.62rem;color:#8b949e">${esc(startRung.codecs || '')}</span></td>
+          <td>${fmtKbpsInt(startRung.kbps)}</td>
+          <td>${fmtDur(startRung.dur)}</td>
+          <td><button class="ql-btn-jump" data-jump-t="${startRung.t}" data-idx="${startRung.idx||''}">Jump</button></td>
+        </tr>
+      `;
+    }
+    switches.forEach((sw, i) => {
+      const isUp = sw.isUpgrade;
+      const arrowIcon = isUp ? '↑' : '↓';
+      const pctBadge = isUp ? `+${sw.ratio.toFixed(0)}%` : `-${sw.ratio.toFixed(0)}%`;
+      html += `
+        <tr class="ql-row" data-time="${sw.t}" data-idx="${sw.idx||''}">
+          <td style="font-family:ui-monospace;color:#8b949e">+${fmtDur(sw.t - t0)}</td>
+          <td>
+            <span>${sw.from.h ? sw.from.h + 'p' : fmtKbpsInt(sw.from.kbps)}</span>
+            <span class="ql-arrow ${isUp ? '' : 'down'}">➔</span>
+            <b style="color:${isUp ? '#7ee787' : '#ffa198'}">${sw.to.h ? sw.to.h + 'p' : fmtKbpsInt(sw.to.kbps)}</b>
+            <span class="kpi-pop-badge ${isUp ? 'good' : 'bad'}" style="margin-left:4px">${arrowIcon} ${pctBadge}</span>
+          </td>
+          <td>${fmtKbpsInt(sw.from.kbps)} ➔ ${fmtKbpsInt(sw.to.kbps)}</td>
+          <td>${fmtDur(sw.to.dur)}</td>
+          <td><button class="ql-btn-jump" data-jump-t="${sw.t}" data-idx="${sw.idx||''}">Jump</button></td>
+        </tr>
+      `;
+    });
+  }
+
+  html += `</tbody></table></div>`;
+
+  if(audioTracks.length > 0){
+    const a = audioTracks[0];
+    html += `
+      <div style="font-size:0.68rem;color:#8b949e;background:#151821;border:1px solid #242b38;border-radius:6px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between">
+        <span>🎧 <b>Audio Track:</b> ${fmtKbpsInt(a.kbps)} (${esc(a.codecs || a.mime || 'audio')})</span>
+        <span style="color:#7ee787">Active</span>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  html += `
+    <div class="kpi-pop-foot">
+      <span>💡 Hover QUALITY in timeline for live rung cursor</span>
+      <button class="mini-btn" id="btnPopClose" style="border-color:#30363d">Close</button>
+    </div>
+  `;
+  return html;
+}
+
+function attachPopHandlers(type){
+  if(!kpiPopEl) return;
+  const btnAll = $('btnPopViewAllErrors');
+  if(btnAll){
+    btnAll.onclick = () => {
+      forceCloseKpiPop();
+      openModal();
+      const search = $('tableSearch');
+      if(search){
+        search.value = 'error';
+        renderTable();
+      }
+    };
+  }
+  kpiPopEl.querySelectorAll('.kpi-err-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.evtIdx;
+      if(!isNaN(idx)){
+        const e = S.events.find(x => x.idx === idx);
+        if(e){
+          setView(e.rel - 2000, e.rel + 2000);
+          select({type:'event', idx});
+          forceCloseKpiPop();
+        }
+      }
+    });
+  });
+  kpiPopEl.querySelectorAll('[data-jump-t]').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const t = +btn.dataset.jumpT;
+      const idx = +btn.dataset.idx;
+      setView(t - 3000, t + 3000);
+      S.hoverT = t;
+      redraw();
+      updateStatus();
+      if(!isNaN(idx) && idx >= 0){
+        select({type:'event', idx});
+      }
+      forceCloseKpiPop();
+    });
+  });
+  const btnClose = $('btnPopClose');
+  if(btnClose) btnClose.onclick = () => forceCloseKpiPop();
+}
+
+if(kpiPopEl){
+  kpiPopEl.addEventListener('mouseenter', () => { clearTimeout(popTimer); });
+  kpiPopEl.addEventListener('mouseleave', () => {
+    if(!popPinned) popTimer = setTimeout(closeKpiPop, 250);
+  });
+}
+document.addEventListener('click', (ev) => {
+  if(kpiPopEl && !kpiPopEl.contains(ev.target) && !ev.target.closest('.kpi.has-pop')){
+    forceCloseKpiPop();
+  }
+});
+window.addEventListener('keydown', (ev) => {
+  if(ev.key === 'Escape' && kpiPopEl && kpiPopEl.style.display !== 'none'){
+    forceCloseKpiPop();
+  }
+});
+
+/* ═══════════════════════════ HOVER / CLICK ═══════════════════════════ */
+let hoverX=0,hoverY=0;
+function nearestEventInView(){
+  const t=S.hoverT;if(t==null)return null;
+  const rows=visibleRows();let best=null,bd=10;
+  for(let ri=0;ri<rows.length;ri++){
+    for(const e of S.categories[rows[ri]]||[]){
+      const d=Math.abs(xOf(e.rel)-xOf(t));
+      if(d<bd){bd=d;best={e,row:ri}}
+    }
+  }
+  return bd<10?best:null;
+}
+function nearestLoad(t){
+  let best=null,bd=8;
+  for(const l of S.loads){
+    const mx=xOf(t);
+    if(l.start<=t&&t<=l.end&&Math.abs(mx-(xOf(l.start)+xOf(l.end))/2)<bd){bd=Infinity;best=l;break}
+    const d=Math.min(Math.abs(xOf(l.start)-mx),Math.abs(xOf(l.end)-mx));
+    if(d<bd){bd=d;best=l}
+  }
+  return bd<8?best:null;
+}
+function stallAt(t){return S.stalls.find(s=>t>=s.start&&t<=s.end)||null}
+function markerAt(t){
+  let best=null,bd=10;
+  for(const m of S.markers){
+    const d=Math.abs(xOf(m.t)-xOf(t));
+    if(d<bd){bd=d;best=m}
+  }
+  return best;
+}
+function stageAt(t){
+  const stages=(S.startupStages||[]).filter(s=>s.dur>1);
+  for(const st of stages)if(t>=st.start&&t<=st.end)return st;
+  let best=null,bd=8;
+  for(const st of stages){
+    const d=Math.min(Math.abs(xOf(st.start)-xOf(t)),Math.abs(xOf(st.end)-xOf(t)));
+    if(d<bd){bd=d;best=st}
+  }
+  return best;
+}
+
+function onMove(ev){
+  const cv=ev.target;if(!cv.dataset)return;
+  const p=panels[+cv.dataset.panel];if(!p)return;
+  const r=cv.getBoundingClientRect();
+  const x=ev.clientX-r.left,y=ev.clientY-r.top;
+  const t=S.view.v0+(x/r.width)*(S.view.v1-S.view.v0);
+  hoverX=ev.clientX;hoverY=ev.clientY;
+  S.hoverT=Math.min(Math.max(t,S.view.v0),S.view.v1);
+  S.hoverEvt=null;S.hoverLoad=null;
+  let tipHTML=null;
+  if(p===evtPanel){
+    const n=nearestEventInView();
+    if(n){S.hoverEvt=n.e;tipHTML=eventTip(n.e);}
+  }else if(p===netPanel){
+    const l=nearestLoad(t);
+    if(l){S.hoverLoad=l;tipHTML=loadTip(l)}
+  }else if(p===stStatePanel){
+    const st=stallAt(t);
+    if(st)tipHTML=stallTip(st);
+    else{
+      const m=markerAt(t);
+      if(m)tipHTML=markerTip(m);
+    }
+  }else if(p===stStartupPanel){
+    const st=stageAt(t);
+    if(st)tipHTML=stageTip(st);
+  }else if(p===stQualPanel){
+    const st=stallAt(t);
+    if(st){tipHTML=stallTip(st)}
+    else{
+      const vq=qualityAt(t);
+      const aq=(S.quality[1]||[]).find(a=>t>=a.t&&t<=a.end);
+      let h=`<div class="t">Quality ladder @ ${fmtDur(t-(S.events[0]?.rel||0))}</div>`;
+      if(vq) h+=`<div class="row"><span class="k">Video:</span> ${vq.h>0?vq.h+'p @ ':''}${fmtKbps(vq.kbps)} <span class="d">${esc(vq.codecs||vq.mime||'')}</span></div>`;
+      if(aq) h+=`<div class="row"><span class="k">Audio:</span> ${fmtKbps(aq.kbps)} <span class="d">${esc(aq.codecs||aq.mime||'')}</span></div>`;
+      const nearSwitch = (S.vSwitches||[]).find(s=>Math.abs(s.t - t) < 3000);
+      if(nearSwitch){
+        const isUp = nearSwitch.isUpgrade;
+        h+=`<div class="row ${isUp?'good':'bad'}" style="margin-top:4px">⇄ Quality switch: ${nearSwitch.from.h?nearSwitch.from.h+'p':fmtKbpsInt(nearSwitch.from.kbps)} ➔ ${nearSwitch.to.h?nearSwitch.to.h+'p':fmtKbpsInt(nearSwitch.to.kbps)} (${isUp?'+':''}${nearSwitch.ratio.toFixed(0)}%)</div>`;
+      }
+      tipHTML=h;
+    }
+  }else if(p===stBufPanel||p===stBwPanel){
+    const st=stallAt(t);
+    if(st){tipHTML=stallTip(st)}
+  }
+  redraw();
+  if(tipHTML){showTip(tipHTML,ev.clientX,ev.clientY)}else hideTip();
+}
+function onClick(ev){
+  const cv=ev.target;const p=panels[+cv.dataset.panel];if(!p)return;
+  const r=cv.getBoundingClientRect();const x=ev.clientX-r.left,y=ev.clientY-r.top;
+  const t=S.view.v0+(x/r.width)*(S.view.v1-S.view.v0);
+  if(p===evtPanel){
+    const n=nearestEventInView();
+    if(n){select({type:'event',idx:n.e.idx});return}
+  }
+  if(p===netPanel){
+    const l=nearestLoad(t);
+    if(l){select({type:'load',idx:S.loads.indexOf(l)});return}
+  }
+  if(p===stQualPanel){
+    const vq=qualityAt(t);
+    if(vq && vq.idx!=null){select({type:'event',idx:vq.idx});return}
+  }
+  const st=stallAt(t);
+  if(st){select({type:'stall',idx:S.stalls.indexOf(st)});return}
+  select(null);
+}
+
+/* ── tooltips ── */
+function eventTip(e){
+  const d=e.details||{};
+  const rows=[];
+  for(const k of Object.keys(d)){
+    if(d[k]==null)continue;
+    let v=d[k];
+    if(k==='trackType')v=TRACK[v]||v;
+    if(k==='selectionReason')v=SELREASON[v]||v;
+    if(k==='playbackState')v=PSTATE[v]||v;
+    if(k==='playWhenReady')v=PWR[v]||v;
+    if(k==='reason'&&e.event==='PositionDiscontinuity')v=DISCREASON[v]||v;
+    if(k==='bitrate')v=fmtKbps((v||0)/1000);
+    if(k==='bytesLoaded')v=fmtBytes(v);
+    if(k==='loadDurationMs'||k==='initializationDurationMs'||k==='bufferedDurationMs')v=fmtDur(v);
+    if(typeof v==='object')v=JSON.stringify(v).slice(0,120);
+    if(k==='uri')v=shortUri(v);
+    rows.push(`<div class="row"><span class="k">${esc(k)}</span> ${esc(v)}</div>`);
+  }
+  return `<div class="t">${esc(e.event)}</div><div class="d">${esc(e.cat.toUpperCase())} · ${fmtDur(e.rel-S.events[0].rel)}${e.duration?` · +${fmtDur(e.duration)}`:''}</div>${rows.join('')}`;
+}
+function loadTip(l){
+  const cls=l.slow?l.crit?'bad':'':'good';
+  const slowTxt=l.slow?`<div class="row ${l.crit?'bad':''}">⚠ ${l.crit?'critically':'unusually'} slow — ${(l.dur/(laneMedNow(l.lane)||1)).toFixed(1)}× lane median</div>`:'';
+  return `<div class="t">${esc(LANE_DEFS[l.lane].label)} download</div><div class="d">${fmtDur(l.start-S.events[0].rel)} → ${fmtDur(l.end-S.events[0].rel)}</div>
+    <div class="row"><span class="k">duration</span> ${fmtDur(l.dur)}${slowTxt?'':''}</div>
+    <div class="row"><span class="k">size</span> ${fmtBytes(l.bytes)}</div>
+    <div class="row"><span class="k">throughput</span> <span class="${cls}">${fmtKbps(l.kbps)}</span></div>
+    <div class="row"><span class="k">type</span> ${esc(l.dataType)}${l.trackType>=0?' ('+esc(TRACK[l.trackType])+')':''}</div>
+    ${l.retried?'<div class="row bad">🔁 retried after LoadError</div>':''}
+    ${slowTxt}
+    <div class="row"><span class="k">uri</span> ${esc(shortUri(l.uri))}</div>`;
+}
+function laneMedNow(lane){const ds=S.loads.filter(x=>x.lane===lane).map(x=>x.dur).sort((a,b)=>a-b);return ds.length?ds[Math.floor(ds.length/2)]:1}
+function stallTip(st){
+  return `<div class="t">REBUFFER · ${fmtDur(st.end-st.start)}</div><div class="d">BUFFERING @ ${fmtDur(st.start-S.events[0].rel)} → READY</div>
+    <div class="row"><span class="k">buffer at start</span> ${fmtDur(st.bufAtStart)}</div>
+    <div class="row ${st.bufAtStart===0?'bad':'warn'}">${st.bufAtStart===0?'buffer depleted to zero':'buffer low'}</div>`;
+}
+const MARKER_META={
+  play:{label:'PLAYING',desc:'playbackState 3 · playWhenReady true',emoji:'▶'},
+  pause:{label:'PAUSED',desc:'playWhenReady set to false',emoji:'⏸'},
+  end:{label:'ENDED',desc:'playbackState 4 · media end reached',emoji:'■'},
+  seek:{label:'SEEK',desc:'position discontinuity — player flushed and jumped',emoji:'⤳'},
+  firstframe:{label:'FIRST FRAME',desc:'first video frame rendered to surface',emoji:'☆'},
+  release:{label:'PLAYER RELEASED',desc:'player released — session ended',emoji:'◈'},
+  drmrel:{label:'DRM RELEASED',desc:'DRM session closed — MediaDrm session released, keys discarded',emoji:'✕'},
+  qswitch:{label:'QUALITY SWITCH',desc:'ABR changed bitrate',emoji:'⇄'},
+};
+function markerTip(m){
+  const meta=MARKER_META[m.type]||{label:m.type,desc:'',emoji:'•'};
+  let extra='';
+  if(m.type==='firstframe'&&S.events[0])extra=`<div class="row"><span class="k">time-to-first-frame</span> ${fmtDur(m.t-S.events[0].rel)}</div>`;
+  if(m.type==='seek')extra=`<div class="row"><span class="k">from → to</span> ${fmtDur(m.from)} → ${fmtDur(m.to)}</div>`;
+  if(m.type==='qswitch')extra=`<div class="row"><span class="k">bitrate</span> ${fmtKbps(m.from)} → ${fmtKbps(m.to)}</div>`;
+  return `<div class="t">${meta.emoji} ${meta.label}</div><div class="d">${fmtDur(m.t-S.events[0].rel)}${m.t>=S.fullRange?(' of '+fmtDur(S.fullRange)):''}</div>${extra}<div class="row">${esc(meta.desc)}</div>`;
+}
+function stageTip(st){
+  const base=S.events[0]?S.events[0].rel:0;
+  let wait='';
+  if(st.name==='MANIFEST'){
+    const ml=S.loads.find(l=>l.dataType==='manifest'&&l.start<=st.end&&l.end>=st.start);
+    if(ml)wait=`<div class="row warn">⌛ waiting on <b>network</b> — manifest fetch ${fmtDur(ml.dur)} (${fmtBytes(ml.bytes)})</div>`;
+  }
+  if(st.name==='TRACKS'){
+    wait=`<div class="row">⌛ waiting on <b>track selection</b> on the main thread after manifest parse</div>`;
+  }
+  if(st.name==='DRM'){
+    const keys=S.drmReady;
+    if(keys)wait=`<div class="row warn">⌛ waiting on <b>DRM</b> — keys ready @ ${fmtDur(keys.rel-base)}</div>`;
+    else wait=`<div class="row">⌛ DRM stage (session acquire → keys)</div>`;
+  }
+  if(st.name==='DECODER'){
+    const dec=S.events.find(e=>e.event==='VideoDecoderInitialized');
+    if(dec)wait=`<div class="row warn">⌛ waiting on <b>MediaCodec</b> — ${esc(dec.details?.decoder||dec.details?.name||'decoder')} init ${fmtDur(dec.details?.initializationDurationMs||0)}</div>`;
+    else wait=`<div class="row">⌛ decoder initialization</div>`;
+  }
+  if(st.name==='BUFFER FILL'){
+    const loadsIn=S.loads.filter(l=>l.start>=st.start&&l.end<=st.end);
+    if(loadsIn.length)wait=`<div class="row warn">⌛ waiting on <b>network</b> — ${loadsIn.length} segment(s) fetched in this window</div>`;
+    else wait=`<div class="row">⌛ buffering media (no segment loads in window)</div>`;
+  }
+  if(st.name==='PRESENT'){
+    wait=`<div class="row">⌛ time from READY to <b>first rendered frame</b></div>`;
+  }
+  return `<div class="t">STARTUP · ${esc(st.name)}</div><div class="d">${fmtDur(st.start-base)} → ${fmtDur(st.end-base)} (${fmtDur(st.dur)})</div>${wait}${S.blocking===st?'<div class="row bad">← critical path — longest stage until READY</div>':''}`;
+}
+
+function showTip(html,x,y){
+  tipEl.innerHTML=html;tipEl.style.display='block';
+  tipEl.style.left=(x+14)+'px';tipEl.style.top=(y+14)+'px';
+  const r=tipEl.getBoundingClientRect();
+  if(r.right>innerWidth-6)tipEl.style.left=Math.max(6,x-14-r.width)+'px';
+  if(r.bottom>innerHeight-6)tipEl.style.top=Math.max(6,y-14-r.height)+'px';
+}
+function hideTip(){tipEl.style.display='none'}
+
+/* ═══════════════════════════ SELECTION / DRAWER ═══════════════════════════ */
+function select(sel){S.sel=sel;updateDrawer();redraw()}
+function drawerRows(list){
+  return list.map(([k,v])=>`<div class="kv"><b>${esc(k)}</b><span>${esc(String(v))}</span></div>`).join('');
+}
+function humanDetail(d,evtName){
+  const o={};
+  for(const k of Object.keys(d)){if(d[k]==null)continue;let v=d[k];
+    if(k==='trackType')v=TRACK[v]||v;
+    if(k==='selectionReason')v=SELREASON[v]||v;
+    if(k==='playbackState')v=PSTATE[v]||v;
+    if(k==='playWhenReady')v=PWR[v]||v;
+    if(k==='reason'&&evtName==='PositionDiscontinuity')v=DISCREASON[v]||v;
+    if(k==='bitrate')v=fmtKbps((v||0)/1000);
+    if(k==='bytesLoaded')v=fmtBytes(v);
+    if(k==='loadDurationMs'||k==='initializationDurationMs'||k==='bufferedDurationMs')v=fmtDur(v);
+    if(k==='uri')v=shortUri(v);
+    if(typeof v==='object')v=JSON.stringify(v).slice(0,400);
+    o[k]=v;
+  }
+  return o;
+}
+function updateDrawer(){
+  const sel=S.sel;
+  if(!sel){drawer.classList.remove('open');return}
+  drawer.classList.add('open');
+  const baseT=S.events[0]?.rel||0;
+  if(sel.type==='event'){
+    const e=S.events[sel.idx];
+    drawerTitle.textContent=e.event||'Event';
+    const d=e.details||{};
+    let html=`<div class="dw"><h4>event</h4>${drawerRows([['category',e.cat.toUpperCase()],['event',e.event],['time',fmtDur(e.rel-baseT)],['thread',e.thread||'main'],['duration',e.duration?fmtDur(e.duration):'—']])}`;
+    if(e.cat==='network'||e.event.startsWith('Load')){
+      const l=S.loads.find(x=>x.e===e);
+      if(l)html+=`<h4>network</h4>${drawerRows([['download',fmtDur(l.dur)],['bytes',fmtBytes(l.bytes)],['throughput',fmtKbps(l.kbps)],['uri',shortUri(l.uri)]])}${l.slow?`<div class="note ${l.crit?'bad':'warn'}">${l.crit?'Critically slow':'Slow'} segment — ${(l.dur/(laneMedNow(l.lane)||1)).toFixed(1)}× the lane median of ${fmtDur(laneMedNow(l.lane))}</div>`:''}`;
+    }
+    html+=`<h4>details</h4>${drawerRows(Object.entries(humanDetail(d,e.event)))}</div>`;
+    drawerBody.innerHTML=html;
+  }else if(sel.type==='load'){
+    const l=S.loads[sel.idx];
+    drawerTitle.textContent=LANE_DEFS[l.lane].label+' download';
+    const st=stallAt(l.start);
+    const vq=qualityAt(l.start);
+    const est=estAt(l.start);
+    const med=laneMedNow(l.lane);
+    const m=`<div class="dw">
+      <h4>request</h4>${drawerRows([['start',fmtDur(l.start-baseT)],['end',fmtDur(l.end-baseT)],['duration',fmtDur(l.dur)],['bytes',fmtBytes(l.bytes)],['throughput',fmtKbps(l.kbps)],['dataType',l.dataType],['contentType',l.contentType||'—']])}
+      ${l.retried?'<div class="note bad">🔁 This load succeeded after a <b>LoadError</b> on the same URI — an automatic retry.</div>':''}
+      <h4>context at download time</h4>${drawerRows([['video quality',vq?vq.h+'p @ '+fmtKbps(vq.kbps):'—'],['ABR estimate',est?fmtKbps(est.kbps):'—'],['lane median',fmtDur(med)+' per segment']])}
+      ${st?`<div class="note bad">⚠ This download happened during a rebuffer (${fmtDur(st.end-st.start)}).</div>`:''}
+      ${l.slow?`<div class="note ${l.crit?'bad':'warn'}">${l.crit?'Critically slow':'Slow'} segment — ${(l.dur/med).toFixed(1)}× the lane median.</div>`:''}
+      <h4>uri</h4><div class="note" style="word-break:break-all">${esc(l.uri)}</div>
+      <h4>events</h4><div class="note">Click the <b>EVENTS</b> panel to inspect the raw LoadStarted / LoadCompleted pair.</div>
+    </div>`;
+    drawerBody.innerHTML=m;
+  }else if(sel.type==='stall'){
+    const st=S.stalls[sel.idx];
+    drawerTitle.textContent='Stall forensic — '+fmtDur(st.end-st.start);
+    const vqStart=qualityAt(st.start),vqEnd=qualityAt(st.end);
+    const concurrent=S.loads.filter(l=>l.start<st.end&&l.end>st.start);
+    const est0=estAt(st.start),est1=estAt(st.end);
+    const seek=S.seeks.filter(s=>s.t>=st.start-2500&&s.t<=st.end);
+    const playState='BUFFERING';
+    const medDur=concurrent.length?Math.round(concurrent.reduce((a,b)=>a+b.dur,0)/concurrent.length):0;
+    let loadRows=concurrent.length?concurrent.slice(0,8).map(l=>`<div class="loadRow"><b>${esc(LANE_DEFS[l.lane].label)}</b><span>${fmtDur(l.dur)} · ${fmtKbps(l.kbps)}</span></div>`).join(''):'<div class="loadRow"><span>none overlapping</span></div>';
+    let html=`<div class="dw">
+      <h4>the stall</h4>${drawerRows([['started',fmtDur(st.start-baseT)],['recovered',fmtDur(st.end-baseT)],['duration',fmtDur(st.end-st.start)],['buffer at start',fmtDur(st.bufAtStart)+' — depleted'],['state during','BUFFERING (playbackState=2)']])}
+      <div class="note ${seek.length?'warn':'bad'}">${waitReason(st.start).emoji} Waiting on: <b>${waitReason(st.start).text}</b></div>
+      ${seek.length?`<div class="note warn">🔎 Triggered by a <b>seek</b> ${fmtDur(seek[0].t-st.start)} before the stall (${fmtDur(seek[0].from)} → ${fmtDur(seek[0].to)}). Buffer was flushed, then had to refill.</div>`:`<div class="note bad">No seek nearby — likely network starvation.</div>`}
+      <h4>why it buffered</h4>${drawerRows([['quality before',vqStart?vqStart.h+'p @ '+fmtKbps(vqStart.kbps):'—'],['quality after',vqEnd?vqEnd.h+'p @ '+fmtKbps(vqEnd.kbps):'—'],['ABR est before',est0?fmtKbps(est0.kbps):'—'],['ABR est after',est1?fmtKbps(est1.kbps):'—']])}
+      ${vqStart&&vqEnd&&vqStart.kbps>vqEnd.kbps?'<div class="note good">ABR stepped quality DOWN after the stall — recovering by shedding load.</div>':''}
+      ${vqStart&&vqEnd&&vqStart.kbps===vqEnd.kbps&&(est0&&est1&&est1.kbps<est0.kbps*0.8)?'<div class="note warn">ABR kept quality constant while its estimate fell — the estimate lagged reality.</div>':''}
+      <h4>concurrent downloads (${concurrent.length})</h4>${loadRows}
+      ${medDur?`<div class="note">avg in-flight segment: ${fmtDur(medDur)}</div>`:''}
+    </div>`;
+    drawerBody.innerHTML=html;
+  }
+}
+/* ═══════════════════════════ v3: DIAGNOSIS / DEVICE / SPEC ═══════════════════════════ */
+function waitReason(t){
+  const st=stallAt(t);
+  const ph=(S.brainPhases||[]).find(p=>t>=p.start&&t<=p.end);
+  const inPlay=S.playSegs.some(ps=>t>=ps.start&&t<=ps.end);
+  const live=S.loads.filter(l=>l.start<t&&l.end>t);
+  const evts=S.events.filter(e=>e.rel>=t-50&&e.rel<=t);
+  if(ph&&ph.kind==='rebuffer'&&st){
+    const seek=S.seeks.filter(s=>s.t>=st.start-2500&&s.t<=st.end);
+    if(seek.length)return{emoji:'🔎',text:'refilling after a seek — buffer was flushed and must refill'};
+    if(live.length)return{emoji:'🌐',text:'waiting on the network — '+live.length+' segment(s) in flight'};
+    return{emoji:'🕳️',text:'buffer depleted, nothing in flight — possible decode/render gap'};
+  }
+  if(ph&&ph.kind==='buffering'){
+    const dkeys=evts.filter(e=>e.cat==='drm');
+    if(dkeys.length)return{emoji:'🔑',text:'blocked on DRM key acquisition'};
+    const live2=S.loads.filter(l=>l.start<t&&l.end>t);
+    if(live2.length)return{emoji:'🌐',text:'initial buffering — fetching '+live2.length+' segment(s) from network'};
+    const de=S.events.find(e=>e.event==='VideoDecoderInitialized'&&e.rel<t);
+    const deEnd=de?de.rel:null;
+    if(de&&deEnd&&deEnd<t)return{emoji:'🎞️',text:'decoder ready but buffer below threshold — playing after '+fmtDur(S.firstReady-t)+' more'};
+    return{emoji:'🎞️',text:'waiting for the decoder / renderer pipeline to come up'};
+  }
+  if(ph&&ph.kind==='preparing')return{emoji:'📄',text:'preparing media source — manifest + track selection'};
+  if(ph&&ph.kind==='selecting')return{emoji:'🎚️',text:'selecting tracks'};
+  if(ph&&ph.kind==='drm')return{emoji:'🔑',text:'acquiring DRM session / keys'};
+  if(ph&&ph.kind==='seeking')return{emoji:'🎯',text:'seeking — flushing pipeline and refilling'};
+  if(ph&&ph.kind==='paused')return{emoji:'⏸️',text:'paused — playWhenReady=false'};
+  return{emoji:'—',text:'no inferred wait'};
+}
+function buildDiagnosis(){
+  const d=[];
+  const{stalls,startup,loads,estimates,startupStages,seekWindows,drops,underruns,errors,firstReady,full,t0,bufferSamples,device}=S;
+  const playT=S.playSegs.reduce((a,p)=>a+(p.end-p.start),0);
+  const stallRatio=stalls.length&&playT?stalls.reduce((a,s)=>a+(s.end-s.start),0)/playT:0;
+  if(stalls.length>0){
+    const firstDur=stalls[0].end-stalls[0].start;
+    if(stallRatio>0.01||stalls.length>2)d.push({sev:'crit',t:stalls[0].start,title:'Rebuffers exceed 1% of playback',body:`${stalls.length} stall(s), ${(stallRatio*100).toFixed(1)}% of playback time. First at ${fmtDur(stalls[0].start-t0)} for ${fmtDur(firstDur)}.`});
+    else d.push({sev:'warn',t:stalls[0].start,title:`Rebuffer of ${fmtDur(firstDur)}`,body:`${stalls.length} stall(s) totaling ${(stallRatio*100).toFixed(1)}% of playback. ${stalls[0].seek?'Triggered by a seek':'Likely network starvation'}.`});
+  }
+  const manifest=startupStages.find(s=>s.name==='MANIFEST');
+  const startupDur=firstReady?firstReady-t0:0;
+  if(manifest&&manifest.dur>0&&startupDur>0&&manifest.dur/startupDur>0.4)d.push({sev:'warn',t:manifest.start,title:'Manifest download dominates startup',body:`${fmtDur(manifest.dur)} of ${fmtDur(startupDur)} startup spent fetching the manifest (${(manifest.dur/startupDur*100).toFixed(0)}%) — slow CDN/TTFB.`});
+  else if(manifest&&manifest.dur>800)d.push({sev:'info',t:manifest.start,title:'Manifest took '+fmtDur(manifest.dur),body:'Long manifest fetch — check CDN latency for the playlist request.'});
+  if(estimates.length){
+    const ests=estimates.map(e=>e.kbps);
+    const avgEst=ests.reduce((a,b)=>a+b,0)/ests.length;
+    const measured=loads.filter(l=>l.dataType==='media'&&l.kbps>0).reduce((a,b)=>a+b.kbps,0)/Math.max(1,loads.filter(l=>l.dataType==='media'&&l.kbps>0).length);
+    if(measured<avgEst*0.6)d.push({sev:'warn',t:estimates[0].t,title:'ABR overestimates throughput',body:`Measured ${fmtKbps(measured)} vs ABR avg ${fmtKbps(avgEst)} (${(measured/avgEst*100).toFixed(0)}%) — the control loop thinks the network is better than it is.`});
+  }
+  const slow=loads.filter(l=>l.slow||l.crit).length;
+  if(loads.length&&slow/loads.length>0.05)d.push({sev:'warn',t:loads.find(l=>l.slow||l.crit)?.start,title:`${slow} of ${loads.length} loads slow/critical`,body:`${(slow/loads.length*100).toFixed(0)}% exceeded 3× lane median — check for network contention or server stalls.`});
+  const decInit=S.kpis.find(k=>k.l==='Video decoder');
+  if(decInit&&/init/.test(decInit.s)){
+    const ms=parseFloat(decInit.s.match(/(\d+) ms/)?.[1]||0);
+    if(ms>300)d.push({sev:'warn',t:S.events.find(e=>e.event==='VideoDecoderInitialized')?.rel,title:`Decoder init ${ms}ms`,body:'MediaCodec initialization took over 300ms — check for codec contention or software fallback.'});
+  }
+  for(const sk of seekWindows){
+    const st=S.stalls.find(s=>s.start>=sk.start&&s.start<=sk.end);
+    if(st)d.push({sev:'warn',t:sk.start,title:'Seek caused a rebuffer',body:`Seek at ${fmtDur(sk.start-t0)} recovered in ${fmtDur(st.end-st.start)} — target the refill with pre-buffer.`});
+  }
+  if(drops>0)d.push({sev:drops>300?'crit':drops>100?'warn':'info',t:0,title:`${drops} frames dropped`,body:'Dropped video frames indicate decode/render pressure. Convert to time at 30fps: ~'+fmtDur(drops/30*1000)+'.'});
+  if(errors.length){
+    const errCounts={};
+    for(const e of errors){const n=e.event||'Error';errCounts[n]=(errCounts[n]||0)+1}
+    const errSummary=Object.entries(errCounts).map(([k,v])=>v>1?`${v}× ${k}`:k).join(', ');
+    d.push({sev:'crit',t:errors[0].rel,title:`${errors.length} error(s): ${errSummary}`,body:'Errors occurred in the session — click the Errors KPI card or check the EVENTS panel for details.'});
+  }
+  const maxBuf=Math.max(...bufferSamples.map(p=>p.v),0);
+  if(maxBuf<4000&&stalls.length)d.push({sev:'warn',t:0,title:'Shallow buffer ceiling',body:`Max buffer depth only ${fmtDur(maxBuf)} — aggressive low-latency or constrained device memory.`});
+  if(!d.length)d.push({sev:'good',title:'No problems found',body:'This session looks healthy. Explore panels for detail.'});
+  S.diag=d;
+}
+function renderDiagnosis(){
+  const el=$('diagnosis');el.style.display=S.diag.length?'block':'none';
+  el.innerHTML=`<div id="diagHead"><b>Session diagnosis</b><span>${S.diag.length} findings · click to jump</span></div>`+S.diag.map((x,i)=>{
+    const icon=x.sev==='crit'?'🔴':x.sev==='warn'?'🟠':x.sev==='good'?'🟢':'🔵';
+    return `<div class="dg ${x.sev}" onclick="${x.t!=null?`setView(${Math.max(0,x.t-2000)},${Math.min(S.fullRange,x.t+2000)})`:''}"><b>${icon} ${esc(x.title)}</b><span>${esc(x.body)}</span></div>`;
+  }).join('');
+}
+function buildDeviceReport(){
+  const s=S.session||{},evs=S.events;
+  const sse=evs.find(e=>e.event==='SessionStart');
+  const sd=sse?.details||{};
+  const dec=evs.find(e=>e.event==='VideoDecoderInitialized');
+  const audioDec=evs.find(e=>e.event==='AudioDecoderInitialized');
+  const drm=[...evs].reverse().find(e=>e.cat==='drm');
+  const rows=[];
+  rows.push(['Device',[['model',sd.device||'—'],['OS',sd.android!=null?('Android '+sd.android):'—'],['API',sd.apiLevel!=null?sd.apiLevel:'—'],['package',s.packageName||'—']]]);
+  rows.push(['Decoder',[['video',dec?dec.details?.decoder||dec.details?.name||'—':'not captured'],['video init',dec?fmtDur(dec.details?.initializationDurationMs||0):'—'],['audio',audioDec?audioDec.details?.decoder||audioDec.details?.name||'—':'—']]]);
+  rows.push(['DRM',[['scheme',drm?drm.details?.scheme||drm.details?.uuid||'—':'not captured'],['state',drm?PSTATE_HINT(drm):'no DRM events'],['keys ready',S.drmReady?fmtDur(S.drmReady.rel):'—']]]);
+  rows.push(['Network',[['total bytes',fmtBytes(S.loads.reduce((a,l)=>a+(l.bytes||0),0))],['requests',S.loads.length],['avg throughput',fmtKbps(S.loads.filter(l=>l.kbps>0).reduce((a,l)=>a+l.kbps,0)/Math.max(1,S.loads.filter(l=>l.kbps>0).length))]]]);
+  rows.push(['Health',[['drops',S.drops||0],['underruns',S.underruns||0],['errors',S.errors.length]]]);
+  const missing=[];
+  if(!dec)missing.push('decoder name/init (wrap MediaCodecAdapter.Factory)');
+  if(!S.drmReady)missing.push('DRM session states (DrmSessionManager events)');
+  if(!sd.device)missing.push('device info in SessionStart event');
+  rows.push(['Not captured',missing.map(m=>['—',m])]);
+  S.deviceRows=rows;
+}
+function PSTATE_HINT(e){const st=e.details?.state;if(st===0)return'UNRELEASED';if(st===1)return'OPENING';if(st===2)return'OPENED';if(st===3)return'OPENED_WITH_KEYS';return e.event}
+function renderDeviceReport(){
+  const el=$('deviceRep');
+  if(!S.deviceRows){el.style.display='none';return}
+  el.style.display='block';
+  $('deviceBody').innerHTML=S.deviceRows.map(([h,rows])=>`<h4>${h}</h4>`+rows.map(([k,v])=>`<div class="dev-row"><span class="k">${esc(k)}</span><span>${esc(String(v))}</span></div>`).join('')).join('');
+}
+const SPEC_TEXT=`CAPTURE SPEC — ExoPlayer session.json for Profiler v3
+================================================================
+Required top-level keys (session header):
+  device      string  e.g. "SM-E625F"       (optional: brand, os, api, packageName)
+  startedAt   number  epoch ms
+  events      [ { cat, event, thread, rel, duration, details } ]
+  rel         number  ms since session start (monotonic)
+
+Events the profiler expects (match these names exactly):
+  StateChanged             details.playbackState 0-4
+  PlayWhenReadyChanged     details.playWhenReady, details.reason
+  Enabled / Changed        details.groups[] (track groups) for track select
+  LoadStarted/Completed    details.uri, dataType("manifest"|"media"), trackType(1 audio,2 video), bytesLoaded, loadDurationMs
+  LoadError                same as LoadStarted + details.error (for retry/redirect chains keep separate pairs)
+  Estimate                 details.kbps
+  Video/AudioDecoderInitialized  details.decoder, details.initializationDurationMs
+  DroppedFrames            details.count
+  Underrun                 (audio sink underrun)
+  RenderedFirstFrame       (frame presented)
+  SessionReleased          (session end)
+
+Required for the v3 DRM timeline (not present in most current exports):
+  DRM: DrmSessionManager events — SessionAcquired {state:1 OPENING}, {state:2 OPENED}, KeysLoaded / KeysRestored (state:3)
+  License HTTP timing: wrap the HttpDataSource.Factory you pass to DefaultHttpMediaDrmCallback and emit LoadStarted/Completed with dataType:"license" — gets a LICENSE lane in the waterfall.
+
+Required for wait-vs-work startup stages:
+  manifest load pair + the first Changed(timeline) event delimit MANIFEST and TRACKS stages.
+  A VideoDecoderInitialized BEFORE first RenderedFirstFrame gives a DECODER stage.
+  RenderedFirstFrame after StateChanged(3) gives the PRESENT stage. Without it only BUFFER FILL is shown.
+
+Optional but recommended (lightweight, huge diagnostic value):
+  onVideoFrameProcessingOffset (exoPlaybackException not needed) → emit as FrameProcessed events for jank
+  onAudioUnderrun {bufferSize, bufferSizeMs, elapsedSinceLastFeedMs} → emit as Underrun
+  onPlaybackErrorChanged {errorCode, message} → emit as PlaybackError (cat:"error")
+  onPlaybackSuppressionReasonChanged → PlayWhenReadyChanged with reason
+  onUpstreamDiscarded → emit for cache eviction diagnosis
+  onMediaSourceInfoRefreshed → emits with manifest event, lets us color reloads
+  onLoadCanceled → emit so canceled prefetches don't read as failures
+
+Implementation notes (Media3 / ExoPlayer 1.x+):
+  • RendererFactory wrapper: build your renderers, poll renderer.isReady()/getState() into the stream.
+  • MediaCodecAdapter.Factory: pass a wrapping factory to MediaCodecRenderer.initialize (or via Player.Listener's onVideoDecoderInitialized which already gives name+initMs — no wrapping needed for the basics).
+  • TrackSelector fork: needed only to dump adaptation decisions (AdaptiveTrackSelection) — optional.
+  • DrmSessionManager: emit from onDrmSessionAcquired/Released + onDrmKeysLoaded/Restored/Removed.
+  • MediaDrm: wrap for provisioning events; MediaDrm.getMetrics() (API 28+) gives raw key-download timing.
+  • Keep payloads flat and numeric where possible; the profiler renders details object verbatim.
+
+The profiler needs only this file — no server, no deps.`;
+function openSpec(){const m=$('specModal');$('specText').textContent=SPEC_TEXT;m.classList.add('open')}
+function closeSpec(){$('specModal').classList.remove('open')}
+
+function qualityAt(t){
+  const vq=S.quality[2]||[];
+  let cur=null;
+  for(const st of vq)if(st.t<=t)cur=st;
+  return cur;
+}
+function estAt(t){
+  let cur=null;
+  for(const e of S.estimates)if(e.t<=t)cur=e;
+  return cur;
+}
+
+/* ═══════════════════════════ VIEW / ZOOM / REPLAY ═══════════════════════════ */
+function setView(v0,v1){
+  const range=S.fullRange;
+  v0=Math.max(0,Math.min(v0,range-1));v1=Math.min(range,Math.max(v1,v0+30));
+  S.view={v0,v1};
+  if(S.playT!=null&&(S.playT<S.view.v0||S.playT>S.view.v1))S.playT=null;
+  redraw();
+}
+function zoomAt(factor,cx){
+  const r=S.view.v1-S.view.v0;
+  const nr=Math.min(r*factor,S.fullRange);
+  const ratio=Math.min(Math.max(cx,0),allCanvasW())/(allCanvasW()||1);
+  const t=S.view.v0+r*ratio;
+  setView(t-nr*ratio,t+nr*(1-ratio));
+}
+function startReplay(){
+  if(S.playing){stopReplay();return}
+  S.playing=true;$('btnReplay').textContent='⏸ Stop';$('btnReplay').classList.add('on');
+  if(S.playT==null||S.playT>S.view.v1||S.playT<S.view.v0)S.playT=S.view.v0;
+  const t0=performance.now(),p0=S.playT;
+  const loop=()=>{
+    if(!S.playing)return;
+    S.playT=p0+(performance.now()-t0);
+    if(S.playT>=S.view.v1){S.playT=S.view.v1;redraw();stopReplay();return}
+    redraw();
+    S.playRAF=requestAnimationFrame(loop);
+  };
+  S.playRAF=requestAnimationFrame(loop);
+}
+function stopReplay(){
+  S.playing=false;if(S.playRAF)cancelAnimationFrame(S.playRAF);
+  $('btnReplay').textContent='▶ Replay';$('btnReplay').classList.remove('on');
+  redraw();
+}
+function liveReadout(){
+  const t=S.playT;if(t==null)return'';
+  const st=stallAt(t);
+  const vq=qualityAt(t),est=estAt(t);
+  const lastLoad=[...S.loads].reverse().find(l=>l.end<=t);
+  const inPlay=S.playSegs.some(ps=>t>=ps.start&&t<=ps.end);
+  const state=st?'BUFFERING':inPlay?'READY':'IDLE';
+  let s=`<span style="color:#e3b341">▶ ${fmtDur(t-S.events[0].rel)}</span> · state <b>${state}</b>`;
+  if(vq)s+=` · ${vq.h}p ${fmtKbpsInt(vq.kbps)}`;
+  if(est)s+=` · ABR ${fmtKbpsInt(est.kbps)}`;
+  if(lastLoad)s+=` · seg ${fmtKbpsInt(lastLoad.kbps)}`;
+  return s;
+}
+function updateStatus(){
+  if(S.playT!=null){statLeft.innerHTML=liveReadout();}
+  else if(S.hoverT!=null){
+    const t=S.hoverT;
+    const st=stallAt(t),vq=qualityAt(t),est=estAt(t);
+    const inPlay=S.playSegs.some(ps=>t>=ps.start&&t<=ps.end);
+    let s=`<b>${fmtDur(t-S.events[0].rel)}</b>`;
+    s+=` · state <b>${st?'BUFFERING':inPlay?'READY':'IDLE'}</b>`;
+    if(vq)s+=` · ${vq.h}p ${fmtKbpsInt(vq.kbps)}`;
+    if(est)s+=` · ABR est ${fmtKbpsInt(est.kbps)}`;
+    if(st)s+=` · <b style="color:#f78166">REBUFFER</b>`;
+    statLeft.innerHTML=s;
+  }else statLeft.innerHTML='hover timeline — click for details';
+  const range=S.view.v1-S.view.v0;
+  statRight.innerHTML=`<span>view ${fmtDur(S.view.v0)} → ${fmtDur(S.view.v1)}</span><span>zoom ${(S.fullRange/Math.max(range,1)).toFixed(1)}×</span><span>${S.events.length} events · ${S.loads.length} requests</span>`;
+}
+
+/* ═══════════════════════════ TABLE / CSV ═══════════════════════════ */
+function renderTable(){
+  const key=S.tableSort.key,dir=S.tableSort.dir;
+  const q=($('tableSearch')?.value||'').trim().toLowerCase();
+  const rows=[...S.events].filter(e=>{
+    if(!q)return true;
+    const d=e.details||{};
+    return [e.event,e.cat,e.category,e.thread,JSON.stringify(d)].some(v=>String(v||'').toLowerCase().includes(q));
+  }).sort((a,b)=>{const va=a[key]??a.rel,vb=b[key]??b.rel;return (va<vb?-1:va>vb?1:0)*dir});
+  const tableTitle=document.querySelector('#tableHead b');
+  if(tableTitle)tableTitle.textContent=q?`Events · ${rows.length}/${S.events.length}`:'All events';
+  tableEl.tHead.innerHTML=`<tr><th data-k="rel">time</th><th data-k="cat">category</th><th data-k="event">event</th><th data-k="thread">thread</th><th>details</th></tr>`;
+  tableEl.tBodies[0].innerHTML=rows.map(e=>{
+    const d=e.details||{};
+    const det=Object.entries(d).map(([k,v])=>{
+      if(v==null)return'';
+      if(k==='uri')return'uri: '+shortUri(v);
+      if(k==='bitrate')return'bitrate: '+fmtKbps(v/1000);
+      if(k==='bytesLoaded')return'bytes: '+fmtBytes(v);
+      if(k==='trackType')return'track: '+(TRACK[v]||v);
+      if(k==='playbackState')return'state: '+(PSTATE[v]||v);
+      if(k==='selectionReason')return'sel: '+(SELREASON[v]||v);
+      if(typeof v==='object')return k+': '+JSON.stringify(v).slice(0,80);
+      return k+': '+v;
+    }).filter(Boolean).join(' · ');
+    return `<tr data-i="${e.idx}"><td class="time">${e.rel.toFixed(0)}</td><td class="cat td-cat-${CAT_ORDER.indexOf(e.cat)}">${e.cat.toUpperCase()}</td><td class="evt">${esc(e.event)}</td><td>${e.thread||'main'}</td><td class="det">${esc(det)}</td></tr>`;
+  }).join('');
+  tableEl.querySelectorAll('th').forEach(th=>{
+    th.onclick=()=>{if(S.tableSort.key===th.dataset.k)S.tableSort.dir*=-1;else S.tableSort={key:th.dataset.k,dir:1};renderTable()};
+  });
+  tableEl.querySelectorAll('tr[data-i]').forEach(tr=>{
+    tr.onclick=()=>{
+      const idx=+tr.dataset.i;
+      const e=S.events[idx];
+      setView(e.rel-1500,e.rel+1500);
+      select({type:'event',idx});
+      closeModal();
+    };
+  });
+}
+function exportCsv(){
+  const rows=[['timeMs','relative_s','category','event','thread','details']];
+  const base=S.events[0]?.rel||0;
+  for(const e of S.events){
+    const d=e.details||{};
+    rows.push([e.rel,(e.rel-base)/1000,e.category,e.event,e.thread||'main',JSON.stringify(d)]);
+  }
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=(S.session?.id||'session')+'_events.csv';
+  a.click();
+}
+function openModal(){renderTable();modal.classList.add('open')}
+function closeModal(){modal.classList.remove('open')}
+
+/* ═══════════════════════════ INTERACTIONS ═══════════════════════════ */
+let dragging=false,lastX=0;
+stackEl.addEventListener('mousemove',e=>{
+  if(dragging){const dx=e.clientX-lastX;lastX=e.clientX;setView(S.view.v0-dx/allCanvasW()*(S.view.v1-S.view.v0),S.view.v1-dx/allCanvasW()*(S.view.v1-S.view.v0));return}
+  onMove(e);
+});
+stackEl.addEventListener('mouseleave',()=>{S.hoverT=null;S.hoverEvt=null;S.hoverLoad=null;hideTip();redraw()});
+stackEl.addEventListener('mousedown',e=>{if(e.button!==0)return;dragging=true;lastX=e.clientX;e.preventDefault();hideTip()});
+window.addEventListener('mouseup',()=>{if(dragging){dragging=false;S.hoverT=null;redraw()}});
+stackEl.addEventListener('dblclick',()=>setView(0,S.fullRange));
+stackEl.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const r=e.target.getBoundingClientRect();
+  const cx=e.clientX-r.left;
+  const scale=Math.exp(e.deltaY*0.0025);
+  zoomAt(scale,cx);
+},{passive:false});
+stackEl.addEventListener('click',onClick);
+
+minimapEl.addEventListener('mousedown',e=>{
+  const r=minimapEl.getBoundingClientRect();
+  const ratio=S.fullRange/r.width;
+  const c=(e.clientX-r.left)*ratio;
+  const half=(S.view.v1-S.view.v0)/2;
+  setView(c-half,c+half);
+  const mv=ev=>{
+    const rr=minimapEl.getBoundingClientRect();
+    const cc=(ev.clientX-rr.left)*S.fullRange/rr.width;
+    setView(cc-half,cc+half);
+  };
+  const up=()=>{window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up)};
+  window.addEventListener('mousemove',mv);window.addEventListener('mouseup',up);
+});
+
+searchEl.addEventListener('input',()=>{S.filterText=searchEl.value.trim();
+  $('searchCount').textContent=S.filterText?`${S.events.filter(evtMatches).length} match`:'';
+  redraw();
+});
+searchEl.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&S.filterText){
+    const matches=S.events.filter(evtMatches);
+    const m=matches[0];
+    if(m){
+      setView(m.rel-2000,m.rel+2000);
+      if(matches.length===1)select({type:'event',idx:m.idx});
+      else{S.sel=null;updateDrawer();redraw()}
+    }
+  }
+});
+document.addEventListener('keydown',e=>{
+  if(e.target===searchEl){if(e.key==='Escape')searchEl.blur();return}
+  if(e.key==='Escape'){if(modal.classList.contains('open'))closeModal();else if(drawer.classList.contains('open'))select(null);return}
+  if(modal.classList.contains('open'))return;
+  if(e.key==='/'){e.preventDefault();searchEl.focus();return}
+  const r=S.view.v1-S.view.v0;
+  if(e.key==='ArrowLeft')setView(S.view.v0-r*0.1,S.view.v1-r*0.1);
+  else if(e.key==='ArrowRight')setView(S.view.v0+r*0.1,S.view.v1+r*0.1);
+  else if(e.key==='+'||e.key==='=')zoomAt(0.8,allCanvasW()/2);
+  else if(e.key==='-')zoomAt(1.25,allCanvasW()/2);
+  else if(e.key==='0')setView(0,S.fullRange);
+});
+
+$('btnReset').onclick=()=>{stopReplay();setView(0,S.fullRange);select(null)};
+$('btnZoomIn').onclick=()=>zoomAt(0.6,allCanvasW()/2);
+$('btnZoomOut').onclick=()=>zoomAt(1.5,allCanvasW()/2);
+$('btnReplay').onclick=startReplay;
+$('btnTable').onclick=openModal;
+$('btnSpec').onclick=openSpec;
+$('btnSpecClose').onclick=closeSpec;
+window.addEventListener('keydown',e=>{if(e.key==='Escape')closeSpec()});
+$('btnModalClose').onclick=closeModal;
+$('tableSearch').addEventListener('input',renderTable);
+$('btnCsv').onclick=exportCsv;
+$('btnLoad').onclick=openFilePicker;
+$('btnBack').onclick=()=>{window.location.href='index.html';};
+$('drawerClose').onclick=()=>select(null);
+
+/* ═══════════════════════════ LIVE TAIL (real-time refresh) ═══════════════════════════ */
+const LIVE={ws:null,enabled:false,pending:[],refreshTimer:null,follow:true};
+function liveBtnLabel(){
+  const b=$('btnLive');if(!b)return;
+  if(!LIVE.enabled){b.textContent='🔴 Live';b.classList.remove('on');return;}
+  const n=LIVE.pending.length+S.events.length;
+  b.textContent=`🟢 Live · ${n} evts`;
+  b.classList.add('on');
+}
+function wsToSessionEvent(d){
+  // Bridge payload {event, category, rel(s), ts(s), tag, details} → session event
+  const rawEvts=S.raw?.events||[];
+  const last=rawEvts[rawEvts.length-1];
+  const tsMs=Math.round((d.ts??Date.now()/1000)*1000);
+  let timeMs;
+  if(last){timeMs=last.timeMs+Math.max(0,tsMs-(last.timestampMs??tsMs));}
+  else{timeMs=Math.round((d.rel??0)*1000);}
+  return{timeMs,timestampMs:tsMs,category:d.category||'Live',event:d.event||'Log',thread:d.tag||'live',details:(d.details&&typeof d.details==='object')?d.details:{}};
+}
+function ensureLiveSession(){
+  if(S.raw&&S.raw.events)return;
+  const now=Date.now();
+  S.raw={schemaVersion:1,session:{id:'live-'+new Date().toISOString().replace(/[:.]/g,'-'),packageName:'live-adb',startedAtEpochMs:now,exportedAtEpochMs:now,durationMs:1000,eventCount:0},events:[]};
+  $('dropzone').classList.add('hidden');
+  $('app').style.display='flex';
+}
+function scheduleLiveRefresh(){
+  if(LIVE.refreshTimer)return;
+  LIVE.refreshTimer=setTimeout(()=>{
+    LIVE.refreshTimer=null;
+    if(!LIVE.pending.length)return;
+    ensureLiveSession();
+    const evts=S.raw.events||[];
+    evts.push(...LIVE.pending);
+    LIVE.pending.length=0;
+    // keep session meta in sync
+    const last=evts[evts.length-1];
+    S.raw.session=S.raw.session||{};
+    S.raw.session.eventCount=evts.length;
+    S.raw.session.durationMs=Math.max(1000,(last?last.timeMs:0)+500);
+    S.raw.session.exportedAtEpochMs=Date.now();
+    const keepView=LIVE.follow?null:{...S.view};
+    try{stopReplay();}catch(e){}
+    analyze(S.raw);
+    renderHeader();buildDiagnosis();renderDiagnosis();buildDeviceReport();renderDeviceReport();layoutPanels();
+    if(LIVE.follow||!keepView)setView(0,S.fullRange);
+    else{const v0=Math.min(keepView.v0,S.fullRange),v1=Math.min(keepView.v1,S.fullRange);setView(v0,Math.max(v1,v0+10));}
+    liveBtnLabel();
+  },1500);
+}
+function setLive(on){
+  LIVE.enabled=on;
+  if(!on&&LIVE.ws){try{LIVE.ws.close();}catch(e){}LIVE.ws=null;}
+  if(on){
+    const connect=()=>{
+      if(!LIVE.enabled)return;
+      try{if(LIVE.ws)LIVE.ws.close();}catch(e){}
+      const ws=new WebSocket('ws://localhost:9090');
+      LIVE.ws=ws;
+      ws.onopen=()=>{liveBtnLabel();};
+      ws.onmessage=(ev)=>{
+        try{
+          const d=JSON.parse(ev.data);
+          LIVE.pending.push(wsToSessionEvent(d));
+          if(LIVE.pending.length>2000)LIVE.pending=LIVE.pending.slice(-2000);
+          if(S.raw.events.length+LIVE.pending.length>5000){
+            // cap so re-analyze stays fast — drop oldest file events, keep live tail
+            S.raw.events=S.raw.events.slice(-3000);
+          }
+          scheduleLiveRefresh();
+          liveBtnLabel();
+        }catch(e){console.error('bad live frame',e);}
+      };
+      ws.onclose=()=>{if(LIVE.enabled)setTimeout(connect,3000);};
+      ws.onerror=()=>{try{ws.close();}catch(e){}};
+    };
+    connect();
+  }
+  liveBtnLabel();
+}
+$('btnLive').onclick=()=>setLive(!LIVE.enabled);
+
+/* ═══════════════════════════ FILE LOADING ═══════════════════════════ */
+function openFilePicker(){
+  const input=document.createElement('input');
+  input.type='file';input.accept='.json,application/json';
+  input.onchange=()=>{if(input.files[0])loadFile(input.files[0])};
+  input.click();
+}
+function loadFile(file){
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const data=JSON.parse(reader.result);
+      bootstrap(data);
+    }catch(err){alert('Failed to parse: '+err.message)}
+  };
+  reader.readAsText(file);
+}
+function bootstrap(raw){
+  analyze(raw);
+  $('dropzone').classList.add('hidden');
+  $('app').style.display='flex';
+  renderHeader();
+  buildDiagnosis();
+  renderDiagnosis();
+  buildDeviceReport();
+  renderDeviceReport();
+  layoutPanels();
+  setView(0,S.fullRange);
+}
+/* drop zone */
+const dz=$('dzBox');
+['dragover','dragenter'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add('drag')}));
+['dragleave','drop'].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove('drag')}));
+dz.addEventListener('drop',e=>{
+  const f=e.dataTransfer.files[0];
+  if(f)loadFile(f);
+});
+dz.addEventListener('click',openFilePicker);
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>e.preventDefault());
+
+/* ── build panels & wire ── */
+buildPanels();
+stStatePanel=panels[1];stBrainPanel=panels[2];stStartupPanel=panels[3];stQualPanel=panels[4];stBufPanel=panels[5];stBwPanel=panels[6];
+window.addEventListener('resize',()=>layoutPanels());
+window.loadSession=raw=>bootstrap(typeof raw==='string'?JSON.parse(raw):raw);
+
+const params=new URLSearchParams(location.search);
+function maybeAutoLive(){
+  // ?live=1 (dashboard "Open in profiler") or live-* session → keep tailing after open
+  try{
+    const isLiveSession=(S.raw?.session?.id||'').startsWith('live-')||(S.raw?.session?.packageName==='live-adb');
+    if(params.get('live')==='1'||isLiveSession){setLive(true);}
+  }catch(e){}
+}
+// Flow 1: v4 dashboard drag-drop → sessionStorage (local files have no URL to fetch)
+try{
+  const pending=sessionStorage.getItem('exo_pending_session');
+  if(pending){
+    sessionStorage.removeItem('exo_pending_session');
+    bootstrap(JSON.parse(pending));
+    maybeAutoLive();
+  }else if(params.get('file')){
+    // Flow 2: v4 dashboard file-list click → ?file=http://localhost:9091/uploads/...
+    fetch(params.get('file')).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(data=>{bootstrap(data);maybeAutoLive();}).catch(err=>{console.error('Failed to load ?file=:',err);});
+  }
+}catch(err){console.error('Failed to load pending session:',err);}
+console.log('🎥 ExoPlayer Profiler v3 ready — drag session.json, or window.loadSession(json)');
+</script>
+</body>
+</html>
