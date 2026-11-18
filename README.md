@@ -43,17 +43,31 @@ The server will start both services:
 - `ws://localhost:9090` - WebSocket for live debugging
 - `http://localhost:9091/` - HTTP for JSON file uploads and dashboard
 
-### 3. Upload JSON from Android
+If `python3 bridge/bridge.py` is run from a different working directory, it still starts: the script adds its project root to the import path itself.
 
-Use `curl` or your Android HTTP client:
+### 3. Upload a session from Android
+
+Upload a profiler session (the JSON file the library writes) to `/upload`. The body must be a session object: it needs `session.id` (or a top-level `id`) or an `events` list. Anything else is rejected with `400 Not a profiler session`. Bodies over 50 MB are rejected with `413`.
 
 ```bash
 curl -X POST http://localhost:9091/upload \
   -H "Content-Type: application/json" \
-  -d '{"event":"TestEvent","details":{"playbackState":2}}'
+  --data-binary @session_20261119_010821_f1571e4f.json
 ```
 
 Or via Android's OkHttp/Retrofit to `http://<local-ip>:9091/upload`.
+
+#### Optional upload token
+
+Set `EXOPROFILER_UPLOAD_TOKEN` before starting the bridge to require a token on every ingest endpoint (`/upload`, `/save-session`, `/api/v3/sessions`). Clients must send `Authorization: Bearer <token>`. Without a valid token the bridge answers `401 Unauthorized`.
+
+```bash
+EXOPROFILER_UPLOAD_TOKEN=change-me python3 bridge/bridge.py
+curl -X POST http://localhost:9091/upload -H "Authorization: Bearer change-me" \
+  -H "Content-Type: application/json" --data-binary @session.json
+```
+
+The dashboard's own "Save Session" button posts to `/save-session` without a token, so it fails while the token is set. Upload from the app or `curl` instead.
 
 ### 4. View uploaded files
 
@@ -129,7 +143,7 @@ This usually means:
 # Test HTTP endpoint
 curl http://localhost:9091/uploaded-files
 
-# Test upload endpoint
+# Test upload endpoint: a non-session body is rejected with 400 (expected)
 curl -X POST http://localhost:9091/upload -H "Content-Type: application/json" -d '{"test":"data"}'
 
 # Test net-info endpoint

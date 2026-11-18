@@ -7,12 +7,20 @@ import sys
 import re
 import os
 import time
+import hmac
+import uuid
 import urllib.parse
 import logging
 logging.getLogger("websockets.server").setLevel(logging.CRITICAL)
 logging.getLogger("websockets.protocol").setLevel(logging.CRITICAL)
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+
+# Allow `python3 bridge/bridge.py` as documented: the script's own directory is on sys.path,
+# but the `bridge` package lives one level up.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from bridge.schema import detect_schema, normalise_session, normalise_event
 from bridge import analysis, chunks, ffprobe
@@ -455,6 +463,35 @@ def _flag(params, name):
     return params.get(name, ["0"])[0] in ("1", "true", "yes")
 
 
+# Largest request body accepted by the ingest endpoints. Real sessions are a few MB.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
+def _upload_token_ok(headers, environ=None):
+    """Optional ingest auth. When EXOPROFILER_UPLOAD_TOKEN is set, every ingest request must
+    send `Authorization: Bearer <token>` (or the bare token). Unset means open, as before."""
+    env = os.environ if environ is None else environ
+    expected = env.get("EXOPROFILER_UPLOAD_TOKEN")
+    if not expected:
+        return True
+    auth = headers.get("Authorization", "") or ""
+    provided = auth[len("Bearer "):] if auth.startswith("Bearer ") else auth
+    return hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8"))
+
+
+def _is_profiler_session(data):
+    """A profiler upload must be a JSON object that identifies a session: a session id
+    (`session.id` or top-level `id`) or an `events` list. Anything else is rejected."""
+    if not isinstance(data, dict):
+        return False
+    session = data.get("session")
+    if isinstance(session, dict) and session.get("id"):
+        return True
+    if data.get("id"):
+        return True
+    return isinstance(data.get("events"), list)
+
+
 class UploadHandler(BaseHTTPRequestHandler):
 
     def _set_cors_headers(self):
@@ -473,6 +510,20 @@ class UploadHandler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
 
+    def _discard_request_body(self):
+        """Read and drop a small request body before answering early. Replying without reading it
+        makes the client see a connection reset instead of the real status code."""
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            return
+        if 0 < length <= MAX_UPLOAD_BYTES:
+            self.rfile.read(length)
+
+    def _reject_unauthorized(self):
+        self._discard_request_body()
+        self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+
     def do_OPTIONS(self):
         self.send_response(200)
         self._set_cors_headers()
@@ -489,14 +540,9 @@ class UploadHandler(BaseHTTPRequestHandler):
             self._handle_session_api(path, method="POST")
             return
         if path == "/api/v3/sessions":
-            # Token validation (optional - if EXOPROFILER_UPLOAD_TOKEN env var is set)
-            auth_header = self.headers.get("Authorization", "")
-            expected_token = os.environ.get("EXOPROFILER_UPLOAD_TOKEN")
-            if expected_token:
-                provided_token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else auth_header
-                if provided_token != expected_token:
-                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
-                    return
+            if not _upload_token_ok(self.headers):
+                self._reject_unauthorized()
+                return
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
             try:
@@ -526,25 +572,40 @@ class UploadHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": str(e)}, status=500)
             return
         if path in ("/upload", "/save-session"):
-            content_length = int(self.headers.get("Content-Length", 0))
+            if not _upload_token_ok(self.headers):
+                self._reject_unauthorized()
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                self._send_json({"status": "error", "message": "Bad Content-Length"}, status=400)
+                return
+            if content_length > MAX_UPLOAD_BYTES:
+                self._send_json({"status": "error", "message": "Payload too large"}, status=413)
+                return
             body = self.rfile.read(content_length)
             try:
                 data = json.loads(body)
+                if not _is_profiler_session(data):
+                    self._send_json(
+                        {"status": "error", "message": "Not a profiler session: expected session.id or an events list"},
+                        status=400,
+                    )
+                    return
                 sess_id = ""
-                if isinstance(data, dict):
-                    if "events" in data and isinstance(data["events"], list):
-                        data["operations"] = parse_operations_from_events(data["events"])
-                        if "session" in data and isinstance(data["session"], dict):
-                            data["session"]["operationCount"] = len(data["operations"])
+                if "events" in data and isinstance(data["events"], list):
+                    data["operations"] = parse_operations_from_events(data["events"])
                     if "session" in data and isinstance(data["session"], dict):
-                        sess_id = data["session"].get("id", "")
-                    elif "id" in data:
-                        sess_id = data["id"]
+                        data["session"]["operationCount"] = len(data["operations"])
+                if "session" in data and isinstance(data["session"], dict):
+                    sess_id = data["session"].get("id", "")
+                elif "id" in data:
+                    sess_id = data["id"]
                 if sess_id:
                     safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(sess_id))
                     filename = f"{safe_id}.json"
                 else:
-                    filename = f"upload_{int(time.time())}.json"
+                    filename = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}.json"
                 filepath = os.path.join(UPLOAD_DIR, filename)
                 atomic_write_json(filepath, data)
                 if hasattr(self.server, "bridge") and self.server.bridge:
