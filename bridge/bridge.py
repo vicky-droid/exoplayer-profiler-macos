@@ -467,6 +467,29 @@ def _flag(params, name):
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
+def _is_safe_upload_name(name):
+    """A plain `*.json` file name: no path separators, no NUL, no dot-files."""
+    return (bool(name) and os.path.basename(name) == name
+            and "/" not in name and "\\" not in name and "\x00" not in name
+            and not name.startswith(".") and name.endswith(".json"))
+
+
+def _resolve_upload_path(name):
+    """Real path of an existing upload, or None. The name must be safe, and the resolved file
+    (after symlinks) must stay inside the uploads folder it was found in."""
+    if not _is_safe_upload_name(name):
+        return None
+    for root in (UPLOAD_DIR, os.path.join(_PROJECT_ROOT, "uploads")):
+        candidate = os.path.join(root, name)
+        if not os.path.isfile(candidate):
+            continue
+        real_root = os.path.realpath(root)
+        real = os.path.realpath(candidate)
+        if os.path.commonpath([real, real_root]) == real_root:
+            return real
+    return None
+
+
 def _upload_token_ok(headers, environ=None):
     """Optional ingest auth. When EXOPROFILER_UPLOAD_TOKEN is set, every ingest request must
     send `Authorization: Bearer <token>` (or the bare token). Unset means open, as before."""
@@ -510,14 +533,14 @@ class UploadHandler(BaseHTTPRequestHandler):
                 self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
 
-    def _discard_request_body(self):
-        """Read and drop a small request body before answering early. Replying without reading it
-        makes the client see a connection reset instead of the real status code."""
+    def _discard_request_body(self, cap=MAX_UPLOAD_BYTES):
+        """Read and drop a request body of up to `cap` bytes before answering early. Replying without
+        reading it makes the client see a connection reset instead of the real status code."""
         try:
             length = int(self.headers.get("Content-Length", 0) or 0)
         except ValueError:
             return
-        if 0 < length <= MAX_UPLOAD_BYTES:
+        if 0 < length <= cap:
             self.rfile.read(length)
 
     def _reject_unauthorized(self):
@@ -581,6 +604,10 @@ class UploadHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": "Bad Content-Length"}, status=400)
                 return
             if content_length > MAX_UPLOAD_BYTES:
+                # Drain a bounded amount so the client sees the 413 rather than a reset; bigger bodies are
+                # not read at all, and the connection closes after the reply.
+                self._discard_request_body(cap=1024 * 1024)
+                self.close_connection = True
                 self._send_json({"status": "error", "message": "Payload too large"}, status=413)
                 return
             body = self.rfile.read(content_length)
@@ -720,18 +747,11 @@ class UploadHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "error", "message": "Not found"}, status=404)
             return
         filename = urllib.parse.unquote(path[len("/uploads/"):])
-        if (not filename or "/" in filename or "\\" in filename
-                or filename.startswith(".") or not filename.endswith(".json")):
+        if not _is_safe_upload_name(filename):
             self._send_json({"status": "error", "message": "Invalid filename"}, status=400)
             return
-        filepath = os.path.join(UPLOAD_DIR, filename)
-        if not os.path.exists(filepath):
-            fallback = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "..", "uploads", filename
-            )
-            if os.path.exists(fallback):
-                filepath = fallback
-        if not os.path.exists(filepath):
+        filepath = _resolve_upload_path(filename)
+        if filepath is None:
             self._send_json({"status": "error", "message": "File not found"}, status=404)
             return
         try:
@@ -884,14 +904,13 @@ class UploadHandler(BaseHTTPRequestHandler):
                 self._send_json({"sessions": []})
             return
         elif path.startswith("/uploads/"):
-            filename = path[len("/uploads/"):]
-            filename = urllib.parse.unquote(filename)
-            filepath = os.path.join(UPLOAD_DIR, filename)
-            if not os.path.exists(filepath):
-                fallback = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads", filename)
-                if os.path.exists(fallback):
-                    filepath = fallback
-            if os.path.exists(filepath):
+            # Same name and containment rules as DELETE: `%2F`, `..`, absolute and symlink escapes are refused.
+            filename = urllib.parse.unquote(path[len("/uploads/"):])
+            if not _is_safe_upload_name(filename):
+                self._send_json({"status": "error", "message": "Invalid filename"}, status=400)
+                return
+            filepath = _resolve_upload_path(filename)
+            if filepath is not None:
                 try:
                     with open(filepath, "r") as f:
                         content = f.read()
