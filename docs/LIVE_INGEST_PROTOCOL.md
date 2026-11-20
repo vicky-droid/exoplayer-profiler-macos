@@ -23,7 +23,8 @@ Items 1.8 (SDK LiveSink) and 1.9 (bridge persistence) must follow this note.
   request. The body field is accepted for one release during migration.
 - `sessionId`: required. The bridge also accepts `session.id`.
 - Reply: `{"type": "hello", "status": "ok", "sessionId": "<id>"}`.
-- Reply on refusal: `{"type": "error", "code": "<code>"}`.
+- Reply on refusal: `{"type": "error", "code": "<code>"}`. A second `hello` on the same socket gets
+  `already_open`. A `hello` for a session that was already saved gets `session_closed`.
 
 ### `batch` (device to bridge)
 
@@ -35,9 +36,13 @@ Items 1.8 (SDK LiveSink) and 1.9 (bridge persistence) must follow this note.
 - `seq` is a device-chosen number. The bridge echoes it.
 - Reply: `{"type": "ack", "seq": 7}`. The ack means the events of that batch were accepted into the
   live session.
-- Current behaviour: every event is accepted and the ack is always sent, even if the session
-  refuses an event. **(planned, 1.9)** The ack covers only the events the session accepted. A duplicate
-  `seq` is rejected, and a gap in `seq` is recorded in the saved session header.
+- The ack covers only the events the session accepted: `{"type": "ack", "seq": 7, "accepted": 24}`.
+  An event is refused when it is not an object with a numeric `tMs` and string `category` and `event`,
+  or when the session is at its event limit. Refused events are not saved and not broadcast.
+- A `seq` seen before is refused with `{"type": "error", "code": "duplicate_seq", "seq": 7}`, with no
+  ack, and the batch's events are dropped.
+- A jump in `seq` is accepted, and the skipped numbers are recorded in the saved header as
+  `seqGaps`, for example `[[2, 3]]` when seq 1 is followed by seq 4.
 
 ### `bye` (device to bridge)
 
@@ -45,9 +50,13 @@ Items 1.8 (SDK LiveSink) and 1.9 (bridge persistence) must follow this note.
 {"type": "bye"}
 ```
 
-- Ends the live session. Reply: `{"type": "bye", "status": "ok"}`.
-- **(planned, 1.9)** The bridge writes `<sessionId>.json` on `bye`, and also when the socket
-  disconnects without a `bye`, and when an idle session goes stale. Each file is written once.
+- Ends the live session. Reply: `{"type": "bye", "status": "ok", "saved": true}`. If the file could not
+  be written, the reply is `{"type": "bye", "status": "save_failed", "saved": false}`.
+- The bridge saves the session as `<sessionId>.json` in the upload folder. It does this on `bye`, when the
+  socket closes without a `bye`, and when the session has had no accepted events for 5 minutes. A session
+  is saved once. An existing file with the same session id is never overwritten. After a failed save the
+  bridge tries again on disconnect or on the next stale check.
+- A session that is already saved refuses further batches with `session_closed`.
 
 ### Unknown types
 
@@ -60,7 +69,13 @@ Items 1.8 (SDK LiveSink) and 1.9 (bridge persistence) must follow this note.
 | `unauthorized` | Token missing or wrong while `EXOPROFILER_LIVE_TOKEN` is set. |
 | `no_session` | `batch` or `bye` before a successful `hello`. |
 | `unknown_message_type` | `type` is not one of the above. |
-| (other) | Returned by `create_session` for an invalid session (for example an empty id). |
+| `bad_message` | The message is JSON but not an object. |
+| `already_open` | A second `hello` on a socket that already has a session. |
+| `session_closed` | `hello` or `batch` for a session that was already saved. |
+| `bad_seq` | `batch.seq` is missing or not an integer. |
+| `duplicate_seq` | `batch.seq` was already accepted on this session. |
+| `bad_events` | `batch.events` is not a list. |
+| (other) | Returned by `create_session` for an invalid session (for example `session_limit_reached`). |
 
 ## Viewer channel (bridge to dashboard)
 
@@ -72,12 +87,22 @@ Items 1.8 (SDK LiveSink) and 1.9 (bridge persistence) must follow this note.
 
 ## Limits
 
-- Batches are capped by the transport. The SDK keeps at most 3000 buffered events per session on the
-  bridge side (`live_events_buffer` is the viewer buffer; **(planned, 1.9)** ingest no longer uses it).
-- A session holds at most `maxEventsPerSession` events (default 10000) before the file is capped.
+- A live session holds its accepted events in memory until it is saved. The bridge's limit is
+  `max_events` in the session config (default 200000). The SDK's own file cap is `maxEventsPerSession`
+  (default 10000), which the bridge does not apply.
+- The viewer buffer (`live_events_buffer`) is not used by ingest. Ingest events reach viewers only
+  as `events` messages.
 
 ## Relation to the saved file
 
 A live session written by the bridge has the same v3 layout as a file written by the SDK
-(`schemaVersion`, `session`, `events`, `aggregates`, `hash`). The bridge does not yet fill `hash`
-for live sessions **(planned, 1.9)**.
+(`schemaVersion`, `session`, `events`, `aggregates`, `hash`). Its `session` header also has:
+
+- `source`: `"live"`.
+- `endReason`: `"bye"`, `"disconnect"` or `"stale"`.
+- `seqGaps` and `rejectedBatches`, from the batch rules above.
+
+The `aggregates` are computed by the bridge with the same rules as the SDK, and they do not depend on
+event order. The `hash` is the first 12 hex characters of SHA-256 over the canonical JSON of the
+document without `hash` (sorted keys, no spaces). It is the bridge's own digest, so it is not
+comparable to the SDK's `hash`, which covers the SDK's exact bytes.

@@ -19,6 +19,7 @@ Normalised internal shape:
   }
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -28,6 +29,101 @@ logger = logging.getLogger(__name__)
 # Schema version thresholds
 SCHEMA_V3 = 3
 SCHEMA_V2 = 2
+
+# Media3 Player.STATE_BUFFERING. The SDK writes this number in PLAYBACK StateChanged details.
+PLAYER_STATE_BUFFERING = 2
+
+
+def is_valid_event(e):
+    """True for an event the v3 layout can hold: an object with a numeric tMs and string category and event."""
+    if not isinstance(e, dict):
+        return False
+    t = e.get('tMs')
+    if isinstance(t, bool) or not isinstance(t, (int, float)):
+        return False
+    return isinstance(e.get('category'), str) and isinstance(e.get('event'), str)
+
+
+def _as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def aggregates_from_events(events):
+    """Session totals from an event list, with the same rules as the SDK's AggregateTracker.
+
+    The result does not depend on the order of the list: rebuffers are worked out from timestamps.
+    A rebuffer is buffering that starts after the first frame. It ends at the next non-buffering state,
+    or at the last event when the session ends while buffering.
+    """
+    category_counts = {}
+    error = chunk = switch = drm = underruns = 0
+    dropped = 0
+    first_frame = None
+    last_t = 0
+    buffering_changes = []
+    for e in events:
+        category = e.get('category')
+        name = e.get('event')
+        details = e.get('details') if isinstance(e.get('details'), dict) else {}
+        t = e['tMs']
+        category_counts[category] = category_counts.get(category, 0) + 1
+        last_t = max(last_t, t)
+        if category == 'CHUNK':
+            chunk += 1
+        elif category == 'ERROR':
+            error += 1
+        elif category == 'DRM':
+            drm += 1
+        elif category == 'TRACKS' and name == 'Switch':
+            switch += 1
+        elif category == 'AUDIO' and name == 'Underrun':
+            underruns += 1
+        elif category == 'VIDEO':
+            if name == 'RenderedFirstFrame':
+                first_frame = t if first_frame is None else min(first_frame, t)
+            elif name == 'DroppedFrames':
+                dropped += _as_int(details.get('droppedFrames', 0))
+        elif category == 'PLAYBACK' and name == 'StateChanged':
+            buffering_changes.append((t, _as_int(details.get('state', -1)) == PLAYER_STATE_BUFFERING))
+
+    rebuffer_count = 0
+    rebuffer_total = 0
+    open_since = None
+    for t, buffering in sorted(buffering_changes, key=lambda c: c[0]):
+        if buffering:
+            if open_since is None and first_frame is not None and t >= first_frame:
+                open_since = t
+                rebuffer_count += 1
+        elif open_since is not None:
+            rebuffer_total += t - open_since
+            open_since = None
+    if open_since is not None:
+        rebuffer_total += last_t - open_since
+
+    return {
+        'categoryCounts': category_counts,
+        'errorCount': error,
+        'chunkCount': chunk,
+        'switchCount': switch,
+        'drmCount': drm,
+        'rebufferCount': rebuffer_count,
+        'rebufferTotalMs': rebuffer_total,
+        'droppedFrames': dropped,
+        'audioUnderruns': underruns,
+    }
+
+
+def document_hash(doc):
+    """First 12 hex characters of SHA-256 over the canonical JSON of the document without its hash.
+
+    This is the bridge's own digest. It is not the SDK's hash, which covers the SDK's exact bytes.
+    """
+    body = {k: v for k, v in doc.items() if k != 'hash'}
+    canonical = json.dumps(body, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:12]
 
 
 def detect_schema(events, raw=None):

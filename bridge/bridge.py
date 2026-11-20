@@ -22,7 +22,15 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from bridge.schema import detect_schema, normalise_session, normalise_event, validate_session_document
+from bridge.schema import (
+    aggregates_from_events,
+    detect_schema,
+    document_hash,
+    is_valid_event,
+    normalise_session,
+    normalise_event,
+    validate_session_document,
+)
 from bridge import analysis, chunks, ffprobe
 
 DEFAULT_TAGS = ["PlaybackProfiler", "ExoPlayer"]
@@ -308,11 +316,19 @@ class LiveSession:
         self.created_at = time.time()
         self.event_count = 0
         self.last_event_time = self.created_at
-        self.events = []  # In-memory buffer for live events
+        self.events = []  # Events accepted into this session, in arrival order
         self.is_active = True
+        self.end_reason = None  # "bye", "disconnect" or "stale": the first one wins
+        self.persisted = False  # True once <sessionId>.json holds this session
+        self.last_seq = None
+        self.seen_seqs = set()
+        self.seq_gaps = []  # [first_missing, last_missing] pairs
+        self.rejected_batches = 0
 
     def add_event(self, event):
-        """Add an event to this session. Returns True if accepted, False if limits exceeded."""
+        """Add one event. Returns True if accepted: a valid event within the session limit."""
+        if not is_valid_event(event):
+            return False
         max_events = self.config.get("max_events", 200000)
         if self.event_count >= max_events:
             return False
@@ -321,9 +337,62 @@ class LiveSession:
         self.last_event_time = time.time()
         return True
 
-    def finalize(self):
-        """Mark session as ended and return a summary dict."""
+    def accept_batch(self, seq, events):
+        """Apply one batch. Returns (accepted_events, error_code).
+
+        A refused batch (bad seq, a seq seen before, or events that are not a list) adds nothing and
+        returns an error code. Otherwise the events that pass add_event are returned, and only those are
+        acked. A jump in seq is recorded as a gap in the saved header.
+        """
+        if isinstance(seq, bool) or not isinstance(seq, int):
+            self.rejected_batches += 1
+            return [], "bad_seq"
+        if seq in self.seen_seqs:
+            self.rejected_batches += 1
+            return [], "duplicate_seq"
+        if not isinstance(events, list):
+            self.rejected_batches += 1
+            return [], "bad_events"
+        if self.last_seq is not None and seq > self.last_seq + 1:
+            self.seq_gaps.append([self.last_seq + 1, seq - 1])
+        self.seen_seqs.add(seq)
+        self.last_seq = seq if self.last_seq is None else max(self.last_seq, seq)
+        return [e for e in events if self.add_event(e)], None
+
+    def build_document(self):
+        """The saved v3 document for this session. Events are ordered by tMs."""
+        events = sorted(self.events, key=lambda e: e["tMs"])
+        header = {
+            "sessionId": self.session_id,
+            "startedAtEpochMs": int(self.created_at * 1000),
+            "exportedAtEpochMs": int(time.time() * 1000),
+            "durationMs": int(max((e["tMs"] for e in events), default=0)),
+            "eventCount": len(events),
+            "droppedEvents": 0,
+            "redacted": bool(self.redacted),
+            "device": self.device if isinstance(self.device, dict) else {},
+            "config": self.config,
+            "source": "live",
+            "endReason": self.end_reason or "ended",
+            "seqGaps": self.seq_gaps,
+            "rejectedBatches": self.rejected_batches,
+            "fileErrors": 0,
+            "attributes": {},
+        }
+        doc = {
+            "schemaVersion": 3,
+            "session": header,
+            "events": events,
+            "aggregates": aggregates_from_events(events),
+        }
+        doc["hash"] = document_hash(doc)
+        return doc
+
+    def finalize(self, reason=None):
+        """Mark session as ended and return a summary dict. The first end reason is kept."""
         self.is_active = False
+        if self.end_reason is None:
+            self.end_reason = reason or "ended"
         return {
             "session_id": self.session_id,
             "event_count": self.event_count,
@@ -372,17 +441,10 @@ class LiveSessionManager:
     def get_active_sessions(self):
         return {sid: s.get_summary() for sid, s in self.sessions.items() if s.is_active}
 
-    def cleanup_stale(self, max_age_seconds=300):
-        """Remove sessions inactive for too long."""
+    def stale_sessions(self, max_age_seconds=300):
+        """Sessions with no accepted events for too long. The caller saves each one before removing it."""
         now = time.time()
-        stale = [
-            sid
-            for sid, s in self.sessions.items()
-            if now - s.last_event_time > max_age_seconds
-        ]
-        for sid in stale:
-            self.remove_session(sid)
-        return stale
+        return [s for s in self.sessions.values() if now - s.last_event_time > max_age_seconds]
 
 
 def _base_dir():
@@ -1335,14 +1397,56 @@ class ExoBridge:
             finally:
                 self.clients.discard(websocket)
 
+    def persist_live_session(self, session, reason):
+        """Save a live session as <sessionId>.json. Returns True once the session is on disk.
+
+        A session is saved once. An existing file for the same session id is never overwritten; it is
+        treated as the saved copy. A failed write leaves the session unsaved, so a later attempt can retry.
+        """
+        session.finalize(reason)
+        if session.persisted:
+            return True
+        doc = session.build_document()
+        ok, error = validate_session_document(doc)
+        if not ok:
+            print(f"⚠ Live session {session.session_id[:8]} not saved: {error}")
+            return False
+        safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(session.session_id))
+        filepath = os.path.join(UPLOAD_DIR, f"{safe_id}.json")
+        if os.path.exists(filepath):
+            session.persisted = True
+            print(f"💾 Live session {safe_id} already has a saved file; not overwritten")
+            return True
+        try:
+            atomic_write_json(filepath, doc)
+        except Exception as e:
+            print(f"⚠ Live session {safe_id} not saved ({reason}): {e.__class__.__name__}")
+            return False
+        session.persisted = True
+        self.scan_uploaded_files()
+        print(f"💾 Saved live session {safe_id} ({reason}, {doc['session']['eventCount']} events)")
+        return True
+
+    def expire_stale_live_sessions(self, max_age_seconds=300):
+        """Save and drop live sessions that have been silent for too long."""
+        for session in self.live_sessions.stale_sessions(max_age_seconds):
+            if self.persist_live_session(session, "stale"):
+                self.live_sessions.remove_session(session.session_id)
+
     async def _handle_ingest(self, websocket):
-        """Handle device ingest WebSocket connection with hello/batch/bye protocol."""
+        """Handle device ingest WebSocket connection with hello/batch/bye protocol.
+
+        The session is saved once: on bye, when the socket closes without bye, or when it goes stale.
+        """
         session = None
         counted = False  # True once this connection is counted in ingest_connections
         try:
             async for message in websocket:
                 try:
                     data = json.loads(message)
+                    if not isinstance(data, dict):
+                        await websocket.send(json.dumps({"type": "error", "code": "bad_message"}))
+                        continue
                     msg_type = data.get("type")
 
                     if msg_type == "hello":
@@ -1354,13 +1458,20 @@ class ExoBridge:
                             await websocket.close()
                             return
 
-                        # Create or resume a live session
+                        if session is not None:
+                            # One session per socket: a second hello would mix two sessions' events.
+                            await websocket.send(json.dumps({"type": "error", "code": "already_open"}))
+                            continue
+
                         session_id = data.get("sessionId") or data.get("session", {}).get("id")
+                        existing = self.live_sessions.get_session(session_id) if session_id else None
+                        if existing is not None and existing.persisted:
+                            await websocket.send(json.dumps({"type": "error", "code": "session_closed"}))
+                            continue
                         schema_version = data.get("schemaVersion", 3)
                         redacted = data.get("redacted", True)
                         device = data.get("device", {})
                         config = data.get("config", {})
-                        # For now, accept any token; in production this could be validated
                         session, error = self.live_sessions.create_session(
                             session_id, schema_version, redacted, device, config
                         )
@@ -1377,20 +1488,27 @@ class ExoBridge:
                         if not session:
                             await websocket.send(json.dumps({"type": "error", "code": "no_session"}))
                             continue
-                        seq = data.get("seq", 0)
-                        events = data.get("events", [])
-                        for evt in events:
-                            session.add_event(evt)
-                            self.live_events_buffer.append(evt)
-                        if len(self.live_events_buffer) > 3000:
-                            self.live_events_buffer = self.live_events_buffer[-3000:]
-                        await websocket.send(json.dumps({"type": "ack", "seq": seq}))
-                        await self.broadcast(json.dumps({"type": "events", "sessionId": session.session_id, "events": events}))
+                        if session.persisted or not session.is_active:
+                            await websocket.send(json.dumps({"type": "error", "code": "session_closed"}))
+                            continue
+                        seq = data.get("seq")
+                        accepted, error = session.accept_batch(seq, data.get("events"))
+                        if error:
+                            await websocket.send(json.dumps({"type": "error", "code": error, "seq": seq}))
+                            continue
+                        # The ack covers only the events the session accepted.
+                        await websocket.send(json.dumps({"type": "ack", "seq": seq, "accepted": len(accepted)}))
+                        if accepted:
+                            await self.broadcast(json.dumps({"type": "events", "sessionId": session.session_id, "events": accepted}))
 
                     elif msg_type == "bye":
                         if session:
-                            session.finalize()
-                        await websocket.send(json.dumps({"type": "bye", "status": "ok"}))
+                            saved = self.persist_live_session(session, "bye")
+                            status = "ok" if saved else "save_failed"
+                        else:
+                            saved = False
+                            status = "ok"
+                        await websocket.send(json.dumps({"type": "bye", "status": status, "saved": saved}))
                         break
 
                     else:
@@ -1403,9 +1521,9 @@ class ExoBridge:
         except websockets.exceptions.ConnectionClosed:
             pass
         finally:
-            # A device that disconnects without sending "bye" must not leave its session marked active.
-            if session is not None and session.is_active:
-                session.finalize()
+            # A socket that closes without "bye" still saves what it sent.
+            if session is not None and not session.persisted:
+                self.persist_live_session(session, "disconnect")
             if counted:
                 self.ingest_connections = max(0, getattr(self, "ingest_connections", 1) - 1)
             self.clients.discard(websocket)
@@ -1443,8 +1561,8 @@ class ExoBridge:
     async def periodic_scan(self):
         while True:
             self.scan_uploaded_files()
-            # Retention cleanup: remove stale live sessions
-            self.live_sessions.cleanup_stale(max_age_seconds=300)
+            # Save and drop live sessions that have gone quiet
+            self.expire_stale_live_sessions(max_age_seconds=300)
             await asyncio.sleep(2)
 
     def scan_uploaded_files(self):
