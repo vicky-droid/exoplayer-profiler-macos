@@ -11,9 +11,11 @@ Security rules (from PYTHON_APP_PLAN section 6):
 - Errors never echo a full URL (signed query tokens must not leak into logs or UI).
 """
 
+import ipaddress
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import urllib.error
@@ -69,6 +71,38 @@ def _safe_host(url):
         return urllib.parse.urlparse(url).hostname or "unknown-host"
     except ValueError:
         return "unknown-host"
+
+
+def address_is_refused(ip_text):
+    """True for addresses the probe must never connect to: loopback, private, link-local, multicast,
+    unspecified and reserved ranges. Unparseable addresses are refused too."""
+    try:
+        addr = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return True
+    if addr.version == 6 and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast
+            or addr.is_unspecified or addr.is_reserved)
+
+
+def check_host_allowed(url, *, allow_private=False, resolver=socket.getaddrinfo):
+    """Refuse a URL whose host resolves to any refused address (SSRF guard, plan 1.18).
+
+    The check runs before each request and on each redirect hop. It does not pin the connected
+    address, so a DNS answer that changes between this check and the connection is not covered.
+    ``allow_private`` is for tests and local lab servers only; the bridge never sets it.
+    """
+    if allow_private:
+        return
+    host = _safe_host(url)
+    try:
+        infos = resolver(host, None)
+    except (OSError, UnicodeError):
+        raise ProbeError(f"Could not resolve {host}.")
+    for info in infos:
+        if address_is_refused(info[4][0]):
+            raise ProbeError(f"{host} resolves to a private or local address, which is not probed.")
 
 
 def _chunk_details(session_events):
@@ -147,15 +181,21 @@ def find_init_chunk(session_events, track_format_id):
 
 
 class _HttpOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, allow_private=False):
+        self.allow_private = allow_private
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not is_allowed_url(newurl):
             raise ProbeError("A redirect to a non-http URL was refused.")
+        check_host_allowed(newurl, allow_private=self.allow_private)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def build_opener():
-    """urllib opener with no cookie jar and http/https-only redirects."""
-    return urllib.request.build_opener(_HttpOnlyRedirectHandler)
+def build_opener(allow_private=False):
+    """urllib opener with no cookie jar, http/https-only redirects, and the address guard on every hop."""
+    opener = urllib.request.build_opener(_HttpOnlyRedirectHandler(allow_private=allow_private))
+    opener.allow_private = allow_private
+    return opener
 
 
 def _range_header(byte_start, byte_length):
@@ -171,6 +211,7 @@ def download_range(url, byte_start, byte_length, dest_path, opener, *,
     """Download one chunk (or byte range) to ``dest_path``. Returns bytes written."""
     if byte_length is not None and byte_length > max_bytes:
         raise ProbeError("Chunk is larger than the per-chunk size cap.")
+    check_host_allowed(url, allow_private=getattr(opener, "allow_private", False))
     headers = {}
     range_value = _range_header(byte_start, byte_length)
     if range_value:

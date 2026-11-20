@@ -128,7 +128,7 @@ class DownloadTest(unittest.TestCase):
     def test_range_download_writes_only_the_requested_bytes(self):
         with _Server() as srv, tempfile.TemporaryDirectory() as d:
             dest = os.path.join(d, "out")
-            written = ffprobe.download_range(f"{srv.base}/seg", 10, 20, dest, ffprobe.build_opener())
+            written = ffprobe.download_range(f"{srv.base}/seg", 10, 20, dest, ffprobe.build_opener(allow_private=True))
             self.assertEqual(written, 20)
             with open(dest, "rb") as f:
                 self.assertEqual(f.read(), PAYLOAD[10:30])
@@ -137,20 +137,20 @@ class DownloadTest(unittest.TestCase):
         with _Server() as srv, tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ffprobe.ProbeError):
                 ffprobe.download_range(f"{srv.base}/seg", 0, -1, os.path.join(d, "out"),
-                                       ffprobe.build_opener(), max_bytes=100)
+                                       ffprobe.build_opener(allow_private=True), max_bytes=100)
 
     def test_redirect_to_non_http_is_refused(self):
         with _Server() as srv, tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ffprobe.ProbeError) as ctx:
                 ffprobe.download_range(f"{srv.base}/redirect-ftp", 0, -1, os.path.join(d, "out"),
-                                       ffprobe.build_opener())
+                                       ffprobe.build_opener(allow_private=True))
             self.assertNotIn("token", str(ctx.exception))
 
     def test_error_message_names_host_not_full_url(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ffprobe.ProbeError) as ctx:
                 ffprobe.download_range("http://127.0.0.1:1/seg?token=SECRET", 0, -1,
-                                       os.path.join(d, "out"), ffprobe.build_opener(), timeout=2)
+                                       os.path.join(d, "out"), ffprobe.build_opener(allow_private=True), timeout=2)
             self.assertNotIn("SECRET", str(ctx.exception))
 
 
@@ -184,7 +184,7 @@ class ProbeChunksTest(unittest.TestCase):
             chunks = ffprobe.select_chunks(events, [2], redacted=False)
             tmp_root = os.path.join(d, "tmproot")
             os.makedirs(tmp_root)
-            results = ffprobe.probe_chunks(chunks, events, ffprobe_path=exe, tmp_root=tmp_root)
+            results = ffprobe.probe_chunks(chunks, events, ffprobe_path=exe, opener=ffprobe.build_opener(allow_private=True), tmp_root=tmp_root)
             self.assertTrue(results[0]["ok"], results)
             self.assertEqual(results[0]["streams"][0]["codec_name"], "h264")
             self.assertEqual(os.listdir(tmp_root), [], "temp directory must be removed")
@@ -194,7 +194,7 @@ class ProbeChunksTest(unittest.TestCase):
             exe = _fake_ffprobe(d, OK_OUTPUT)
             events = [_event(1, "MEDIA", f"{srv.base}/a"), _event(2, "MEDIA", "http://127.0.0.1:1/b")]
             chunks = ffprobe.select_chunks(events, [1, 2], redacted=False)
-            results = ffprobe.probe_chunks(chunks, events, ffprobe_path=exe, tmp_root=d)
+            results = ffprobe.probe_chunks(chunks, events, ffprobe_path=exe, opener=ffprobe.build_opener(allow_private=True), tmp_root=d)
             self.assertTrue(results[0]["ok"])
             self.assertFalse(results[1]["ok"])
             self.assertIn("error", results[1])
