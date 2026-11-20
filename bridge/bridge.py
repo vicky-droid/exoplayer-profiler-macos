@@ -320,6 +320,7 @@ class LiveSession:
         self.is_active = True
         self.end_reason = None  # "bye", "disconnect" or "stale": the first one wins
         self.persisted = False  # True once <sessionId>.json holds this session
+        self.discarded = False  # True when the session was deleted through the API; nothing is saved
         self.last_seq = None
         self.seen_seqs = set()
         self.seq_gaps = []  # [first_missing, last_missing] pairs
@@ -387,6 +388,11 @@ class LiveSession:
         }
         doc["hash"] = document_hash(doc)
         return doc
+
+    def discard(self):
+        """Close the session without saving it."""
+        self.is_active = False
+        self.discarded = True
 
     def finalize(self, reason=None):
         """Mark session as ended and return a summary dict. The first end reason is kept."""
@@ -812,15 +818,24 @@ class UploadHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path = self.path.split("?", 1)[0]
-        if path == "/api/v3/sessions":
-            # Delete a live session by ID
+        if path == "/api/v3/sessions" or path.startswith("/api/v3/sessions/"):
+            # Discard a live session by ID. Its events are dropped, not saved: the session is marked
+            # discarded so later batches on its socket are refused and its disconnect saves nothing.
             sess_id = urllib.parse.unquote(path[len("/api/v3/sessions/"):])
             bridge = getattr(self.server, "bridge", None)
             if not bridge or not hasattr(bridge, "live_sessions"):
                 self._send_json({"status": "error", "message": "Bridge not available"}, status=500)
                 return
+            if not sess_id:
+                self._send_json({"status": "error", "message": "Missing session id"}, status=400)
+                return
+            session = bridge.live_sessions.get_session(sess_id)
+            if session is None:
+                self._send_json({"status": "error", "message": "Session not found"}, status=404)
+                return
+            session.discard()
             bridge.live_sessions.remove_session(sess_id)
-            self._send_json({"status": "ok"})
+            self._send_json({"status": "ok", "sessionId": sess_id})
             return
         if not path.startswith("/uploads/"):
             self._send_json({"status": "error", "message": "Not found"}, status=404)
@@ -1465,7 +1480,7 @@ class ExoBridge:
 
                         session_id = data.get("sessionId") or data.get("session", {}).get("id")
                         existing = self.live_sessions.get_session(session_id) if session_id else None
-                        if existing is not None and existing.persisted:
+                        if existing is not None and (existing.persisted or existing.discarded):
                             await websocket.send(json.dumps({"type": "error", "code": "session_closed"}))
                             continue
                         schema_version = data.get("schemaVersion", 3)
@@ -1488,7 +1503,7 @@ class ExoBridge:
                         if not session:
                             await websocket.send(json.dumps({"type": "error", "code": "no_session"}))
                             continue
-                        if session.persisted or not session.is_active:
+                        if session.persisted or session.discarded or not session.is_active:
                             await websocket.send(json.dumps({"type": "error", "code": "session_closed"}))
                             continue
                         seq = data.get("seq")
@@ -1522,7 +1537,7 @@ class ExoBridge:
             pass
         finally:
             # A socket that closes without "bye" still saves what it sent.
-            if session is not None and not session.persisted:
+            if session is not None and not session.persisted and not session.discarded:
                 self.persist_live_session(session, "disconnect")
             if counted:
                 self.ingest_connections = max(0, getattr(self, "ingest_connections", 1) - 1)

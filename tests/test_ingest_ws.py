@@ -259,5 +259,67 @@ class LiveSessionUnitTests(unittest.TestCase):
             self.assertEqual(expected, aggregates_from_events(shuffled))
 
 
+class SessionDeleteHttpTests(_Harness):
+    """DELETE /api/v3/sessions/<id> discards a live session (V6)."""
+
+    def setUp(self):
+        super().setUp()
+        self.http_port = _free_port()
+        self.http = bridge_mod.ThreadedHTTPServer(("127.0.0.1", self.http_port), bridge_mod.UploadHandler)
+        self.http.bridge = self.bridge
+        self.http_thread = threading.Thread(target=self.http.serve_forever, daemon=True)
+        self.http_thread.start()
+
+    def tearDown(self):
+        self.http.shutdown()
+        self.http.server_close()
+        super().tearDown()
+
+    def delete(self, path):
+        import urllib.error
+        import urllib.request
+
+        req = urllib.request.Request(f"http://127.0.0.1:{self.http_port}{path}", method="DELETE")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_delete_by_id_removes_the_live_session(self):
+        async def open_session():
+            ws = await self.connect().__aenter__()
+            await ws.send(json.dumps({"type": "hello", "sessionId": "sess-del-0009"}))
+            await ws.recv()
+            return ws
+
+        loop = asyncio.new_event_loop()
+        ws = loop.run_until_complete(open_session())
+        self.assertIsNotNone(self.bridge.live_sessions.get_session("sess-del-0009"))
+
+        status, body = self.delete("/api/v3/sessions/sess-del-0009")
+        self.assertEqual((200, {"status": "ok", "sessionId": "sess-del-0009"}), (status, body))
+        self.assertIsNone(self.bridge.live_sessions.get_session("sess-del-0009"))
+
+        # The same socket can still send, but nothing is saved for the discarded session.
+        async def send_after_delete():
+            await ws.send(json.dumps({"type": "batch", "seq": 1, "events": [_event(10)]}))
+            reply = json.loads(await ws.recv())
+            await ws.close()
+            return reply
+
+        self.assertEqual({"type": "error", "code": "session_closed"}, loop.run_until_complete(send_after_delete()))
+        loop.close()
+        time.sleep(0.3)
+        self.assertIsNone(self.saved("sess-del-0009"))
+
+    def test_delete_of_an_unknown_session_is_404(self):
+        self.assertEqual((404, {"status": "error", "message": "Session not found"}),
+                         self.delete("/api/v3/sessions/no-such-session"))
+
+    def test_delete_without_an_id_is_400(self):
+        self.assertEqual(400, self.delete("/api/v3/sessions/")[0])
+
+
 if __name__ == "__main__":
     unittest.main()
