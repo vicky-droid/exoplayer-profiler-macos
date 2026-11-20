@@ -157,7 +157,48 @@ class IngestEndpointTest(unittest.TestCase):
         self.assertEqual(status, 401)
         status, _ = self._post("/api/v3/sessions", self._session("v3_1"),
                                headers={"Authorization": "Bearer s3cret"})
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 201)
+
+    # --- 1.17: the v3 endpoint must persist what it accepts -------------------
+
+    def _v3_doc(self, sid="v3_store"):
+        return {
+            "schemaVersion": 3,
+            "session": {"sessionId": sid, "packageName": "com.example", "eventCount": 2, "redacted": True,
+                        "droppedEvents": 4, "recovered": True, "device": {"manufacturer": "Google"}},
+            "events": [
+                {"tMs": 1, "category": "PLAYBACK", "event": "StateChanged", "details": {}},
+                {"tMs": 9, "category": "VIDEO", "event": "RenderedFirstFrame", "details": {}},
+            ],
+        }
+
+    def test_v3_endpoint_writes_file_with_header_counters(self):
+        status, body = self._post("/api/v3/sessions", self._v3_doc("v3_store"))
+        self.assertEqual(status, 201)
+        self.assertEqual(body["filename"], "v3_store.json")
+        with open(os.path.join(self._tmp.name, "v3_store.json")) as f:
+            stored = json.load(f)
+        self.assertEqual(len(stored["events"]), 2)
+        self.assertEqual(stored["session"]["droppedEvents"], 4)
+        self.assertTrue(stored["session"]["recovered"])
+        self.assertEqual(stored["session"]["operationCount"], len(stored["operations"]))
+        self.assertEqual(self.bridge.scans, 1)
+
+    def test_v3_endpoint_rejects_bad_shape_and_writes_nothing(self):
+        bad = self._v3_doc("v3_bad")
+        bad["events"][0]["tMs"] = "soon"
+        status, body = self._post("/api/v3/sessions", bad)
+        self.assertEqual(status, 400)
+        self.assertIn("tMs", body["message"])
+        self.assertEqual(os.listdir(self._tmp.name), [])
+
+    def test_v3_endpoint_reports_500_when_write_fails(self):
+        from unittest import mock
+        with mock.patch("bridge.bridge.os.replace", side_effect=OSError("disk full")):
+            status, body = self._post("/api/v3/sessions", self._v3_doc("v3_full"))
+        self.assertEqual(status, 500)
+        self.assertNotIn("v3_full.json", os.listdir(self._tmp.name))
+        self.assertEqual(self.bridge.scans, 0)
 
 
 class StartupTest(unittest.TestCase):

@@ -146,6 +146,42 @@ def _empty_session():
     }
 
 
+# Header fields the viewer needs that the SDK writes. They are passed through unchanged so a
+# normalised session keeps the same counters, device and attributes as the file on the device.
+V3_HEADER_PASSTHROUGH = (
+    'sessionId', 'droppedEvents', 'fileErrors', 'recovered', 'attributes', 'device', 'config',
+    'media3Version', 'sdkVersion', 'health', 'droppedByCategory', 'outOfSessionEvents',
+    'cappedEventsCounted', 'operationCount',
+)
+
+
+def validate_session_document(raw):
+    """Check the shape of a v3 session document before it is stored.
+
+    Returns (ok, error). Only the fields the bridge depends on are checked; the rest is kept as sent.
+    """
+    if not isinstance(raw, dict):
+        return False, "Session must be a JSON object"
+    session = raw.get('session')
+    if not isinstance(session, dict):
+        return False, "Missing session header"
+    sess_id = session.get('sessionId') or session.get('id')
+    if not isinstance(sess_id, str) or not sess_id.strip():
+        return False, "Missing session id"
+    events = raw.get('events')
+    if not isinstance(events, list):
+        return False, "events must be a list"
+    for i, e in enumerate(events):
+        if not isinstance(e, dict):
+            return False, f"events[{i}] is not an object"
+        t = e.get('tMs')
+        if not isinstance(t, (int, float)) or isinstance(t, bool):
+            return False, f"events[{i}].tMs must be a number"
+        if not isinstance(e.get('category'), str) or not isinstance(e.get('event'), str):
+            return False, f"events[{i}] needs string category and event"
+    return True, None
+
+
 def _normalise_v3(raw):
     """Normalise schema v3 format."""
     session_raw = raw.get('session', {})
@@ -160,8 +196,12 @@ def _normalise_v3(raw):
         'exportedAtEpochMs': session_raw.get('exportedAtEpochMs', 0),
         'durationMs': session_raw.get('durationMs', 0),
         'eventCount': session_raw.get('eventCount', 0),
-        'redacted': session_raw.get('redacted', False),
+        # A missing flag means the content is treated as redacted (1.18): never assume raw.
+        'redacted': session_raw.get('redacted', True),
     }
+    for key in V3_HEADER_PASSTHROUGH:
+        if key in session_raw:
+            session[key] = session_raw[key]
 
     events = []
     for e in events_raw:

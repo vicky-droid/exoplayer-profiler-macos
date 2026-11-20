@@ -22,7 +22,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from bridge.schema import detect_schema, normalise_session, normalise_event
+from bridge.schema import detect_schema, normalise_session, normalise_event, validate_session_document
 from bridge import analysis, chunks, ffprobe
 
 DEFAULT_TAGS = ["PlaybackProfiler", "ExoPlayer"]
@@ -419,12 +419,14 @@ def atomic_write_json(filepath, data):
             json.dump(data, f, indent=2)
         os.replace(tmp_path, filepath)
     except Exception:
-        # Clean up temp file on failure
+        # Clean up temp file on failure, then let the caller report it. A silent failure here used to
+        # turn into a 200 response for a file that was never written.
         try:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except Exception:
             pass
+        raise
 
 def resolve_lan_policy(allow_lan, env):
     """LAN mode is only honoured when both ingest tokens are set (plan V2).
@@ -566,33 +568,48 @@ class UploadHandler(BaseHTTPRequestHandler):
             if not _upload_token_ok(self.headers):
                 self._reject_unauthorized()
                 return
-            content_length = int(self.headers.get("Content-Length", 0))
+            # The SDK's UploadSink posts a whole session here. It is stored as <sessionId>.json and only
+            # reported as saved once the write has succeeded: 201 on success, 500 if the write fails, so
+            # the SDK keeps its staged copy.
+            try:
+                content_length = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                self._send_json({"status": "error", "message": "Bad Content-Length"}, status=400)
+                return
+            if content_length > MAX_UPLOAD_BYTES:
+                self._discard_request_body(cap=1024 * 1024)
+                self.close_connection = True
+                self._send_json({"status": "error", "message": "Payload too large"}, status=413)
+                return
             body = self.rfile.read(content_length)
             try:
                 data = json.loads(body)
-                sess_id = data.get("session", {}).get("id") or data.get("id")
-                if not sess_id:
-                    self._send_json({"status": "error", "message": "Missing session id"}, status=400)
-                    return
-                bridge = getattr(self.server, "bridge", None)
-                if not bridge or not hasattr(bridge, "live_sessions"):
-                    self._send_json({"status": "error", "message": "Bridge not available"}, status=500)
-                    return
-                session, error = bridge.live_sessions.create_session(
-                    sess_id,
-                    data.get("schemaVersion", 3),
-                    data.get("redacted", True),
-                    data.get("session", {}).get("device", {}),
-                    data.get("config", {}),
-                )
-                if error:
-                    self._send_json({"status": "error", "message": error}, status=400)
-                    return
-                self._send_json({"status": "ok", "filename": f"{sess_id}.json", "duplicate": False})
             except json.JSONDecodeError:
                 self._send_json({"status": "error", "message": "Invalid JSON"}, status=400)
+                return
+            ok, error = validate_session_document(data)
+            if not ok:
+                self._send_json({"status": "error", "message": error}, status=400)
+                return
+            if "events" in data and isinstance(data["events"], list):
+                data["operations"] = parse_operations_from_events(data["events"])
+                data["session"]["operationCount"] = len(data["operations"])
+            sess_id = data["session"].get("sessionId") or data["session"].get("id")
+            safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(sess_id))
+            filename = f"{safe_id}.json"
+            filepath = os.path.join(UPLOAD_DIR, filename)
+            replaced = os.path.exists(filepath)
+            try:
+                atomic_write_json(filepath, data)
             except Exception as e:
-                self._send_json({"status": "error", "message": str(e)}, status=500)
+                self._send_json(
+                    {"status": "error", "message": f"Could not save session: {e.__class__.__name__}"},
+                    status=500,
+                )
+                return
+            if hasattr(self.server, "bridge") and self.server.bridge:
+                self.server.bridge.scan_uploaded_files()
+            self._send_json({"status": "ok", "filename": filename, "replaced": replaced}, status=201)
             return
         if path in ("/upload", "/save-session"):
             if not _upload_token_ok(self.headers):
