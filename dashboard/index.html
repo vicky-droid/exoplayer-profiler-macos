@@ -266,6 +266,8 @@
         let liveBuffer = [];
         let liveWs = null;
         let serverFilesList = [];
+        // Live sessions held by the bridge. Kept apart from uploaded file names (plan 1.20).
+        let apiSessionsList = [];
         let activeAutoSessionId = null;
         let autoSaveTimer = null;
         let bufferPersistTimer = null;
@@ -344,7 +346,8 @@
             });
         };
 
-        let netInfo = { local_ip: null, ws_url: 'ws://localhost:9090', http_url: 'http://localhost:9091' };
+        // Ports come only from /net-info (plan 1.20). Until it loads, netInfo is null and live connect waits.
+        let netInfo = null;
         async function loadNetInfo() {
             try {
                 const resp = await fetch('/net-info');
@@ -360,12 +363,16 @@
         const netText = document.getElementById('net-text');
         const btnCopyIp = document.getElementById('btn-copy-ip');
         if (btnCopyIp) btnCopyIp.onclick = async () => {
-            try { await navigator.clipboard.writeText(netInfo.http_url + '/upload'); btnCopyIp.innerText = '✅ Copied!'; setTimeout(() => btnCopyIp.innerText = 'Copy', 2000); }
+            try {
+                if (!netInfo || !netInfo.http_url) throw new Error('bridge address not loaded yet');
+                await navigator.clipboard.writeText(netInfo.http_url + '/upload');
+                btnCopyIp.innerText = '✅ Copied!'; setTimeout(() => btnCopyIp.innerText = 'Copy', 2000);
+            }
             catch (e) { console.error(e); }
         };
 
         function setLiveStatus(connected, text) {
-            const wsLabel = netInfo.local_ip ? `${netInfo.ws_url}` : netInfo.ws_url;
+            const wsLabel = netInfo && netInfo.ws_url ? netInfo.ws_url : 'bridge (address unknown)';
             if (connected) {
                 indicator.classList.add('live-on');
                 connText.innerText = `🟢 Connected to ${wsLabel}`;
@@ -826,6 +833,18 @@
                 });
             });
 
+            apiSessionsList.forEach(s => {
+                items.push({
+                    type: 'live',
+                    id: s.id,
+                    name: s.name,
+                    timestamp: s.startedAtEpochMs || 0,
+                    eventCount: s.eventCount,
+                    redacted: s.redacted,
+                    source: 'live'
+                });
+            });
+
             // Filter
             const filtered = items.filter(it => {
                 if (!q) return true;
@@ -854,7 +873,9 @@
                 li.onmouseleave = () => li.style.borderColor = 'var(--line)';
 
                 let badgeHtml = '';
-                if (it.type === 'auto') {
+                if (it.type === 'live') {
+                    badgeHtml = '<span class="pill tag" style="color: var(--muted); font-size: 0.65rem;">Live (not saved)</span>';
+                } else if (it.type === 'auto') {
                     badgeHtml = '<span class="pill tag" style="color: var(--amber); border-color: #3f3a2e; background: #2a1f15; font-size: 0.65rem;">Auto-saved</span>';
                 } else if (it.type === 'saved') {
                     badgeHtml = '<span class="pill tag" style="color: var(--green); border-color: #1f3d2e; background: #12241b; font-size: 0.65rem;">Saved</span>';
@@ -869,16 +890,19 @@
                 const countStr = it.eventCount != null ? ` · ${it.eventCount} events` : '';
 
                 let actionsHtml = '';
-                if (it.source === 'server') {
+                if (it.source === 'live') {
+                    // Nothing to act on until the session is saved. Its id is not a file name.
+                    actionsHtml = '';
+                } else if (it.source === 'server') {
                     actionsHtml = `
-                        <button class="mini-btn" onclick="loadAndOpenProfiler('${esc(it.name)}')" title="Open in full profiler UI" style="border-color: var(--accent); color: var(--accent); padding: 5px 10px;">📊 Open in profiler</button>
-                        <button class="mini-btn" onclick="deleteServerSession('${esc(it.name)}')" title="Delete server session" style="border-color: var(--red); color: var(--red); padding: 5px 10px;">🗑️</button>
+                        <button class="mini-btn" data-action="open-file" data-id="${esc(it.name)}" title="Open in full profiler UI" style="border-color: var(--accent); color: var(--accent); padding: 5px 10px;">📊 Open in profiler</button>
+                        <button class="mini-btn" data-action="delete-file" data-id="${esc(it.name)}" title="Delete server session" style="border-color: var(--red); color: var(--red); padding: 5px 10px;">🗑️</button>
                     `;
                 } else {
                     actionsHtml = `
-                        <button class="mini-btn" onclick="openSavedSessionInProfiler('${esc(it.id)}')" title="Open in full profiler UI" style="border-color: var(--accent); color: var(--accent); padding: 5px 10px;">📊 Open</button>
-                        <button class="mini-btn" onclick="restoreSavedSessionById('${esc(it.id)}')" title="Restore to live buffer" style="padding: 5px 10px;">🔄 Restore</button>
-                        <button class="mini-btn" onclick="deleteSavedSession('${esc(it.id)}')" title="Delete saved session" style="border-color: var(--red); color: var(--red); padding: 5px 10px;">🗑️</button>
+                        <button class="mini-btn" data-action="open-saved" data-id="${esc(it.id)}" title="Open in full profiler UI" style="border-color: var(--accent); color: var(--accent); padding: 5px 10px;">📊 Open</button>
+                        <button class="mini-btn" data-action="restore-saved" data-id="${esc(it.id)}" title="Restore to live buffer" style="padding: 5px 10px;">🔄 Restore</button>
+                        <button class="mini-btn" data-action="delete-saved" data-id="${esc(it.id)}" title="Delete saved session" style="border-color: var(--red); color: var(--red); padding: 5px 10px;">🗑️</button>
                     `;
                 }
 
@@ -897,6 +921,20 @@
                 ul.appendChild(li);
             });
 
+            // One delegated listener. Session ids go in data attributes, never into script text, so an id
+            // with quotes or script in it cannot run as code (plan 1.20).
+            ul.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-action]');
+                if (!btn || !ul.contains(btn)) return;
+                const id = btn.dataset.id;
+                switch (btn.dataset.action) {
+                    case 'open-file': loadAndOpenProfiler(id); break;
+                    case 'delete-file': deleteServerSession(id); break;
+                    case 'open-saved': openSavedSessionInProfiler(id); break;
+                    case 'restore-saved': restoreSavedSessionById(id); break;
+                    case 'delete-saved': deleteSavedSession(id); break;
+                }
+            });
             unifiedSessionsList.appendChild(ul);
             const count = document.createElement('p');
             count.style.cssText = 'color: var(--muted); font-size: 0.72rem; margin: 8px 0 0; text-align: right;';
@@ -916,6 +954,12 @@
 
         function initLiveEvents() {
             try { if (liveWs) liveWs.close(); } catch (e) {}
+            if (!netInfo || !netInfo.ws_url) {
+                // /net-info has not answered yet. Retry rather than guessing a port.
+                setLiveStatus(false, 'waiting for bridge address (/net-info)');
+                loadNetInfo().finally(() => setTimeout(initLiveEvents, 3000));
+                return;
+            }
             liveWs = new WebSocket(netInfo.ws_url);
 
             liveWs.onopen = () => setLiveStatus(true);
@@ -954,20 +998,18 @@
                 if (resp.ok) {
                     const data = await resp.json();
                     const sessions = Array.isArray(data.sessions) ? data.sessions : [];
-                    // Add live sessions to serverFilesList for unified rendering
-                    sessions.forEach(s => {
-                        serverFilesList.push({
-                            name: `${s.id}.json`,
-                            id: s.id,
-                            source: 'api',
-                            schema: s.schema,
-                            redacted: s.redacted,
-                            device: (device && device.manufacturer) ? `${device.manufacturer} ${device.model}` : (device && device.manufacturer ? device.manufacturer : 'unknown'),
-                            eventCount: s.eventCount || 0,
-                            startedAtEpochMs: session.startedAtEpochMs || 0,
-                            deviceInfo: device
-                        });
-                    });
+                    // Live sessions go into their own typed list. Uploaded files stay as file names.
+                    apiSessionsList = sessions.map(s => ({
+                        id: s.id,
+                        name: `${s.id}`,
+                        schema: s.schema,
+                        redacted: s.redacted,
+                        eventCount: s.eventCount || 0,
+                        startedAtEpochMs: s.startedAtEpochMs || 0,
+                        device: (s.device && s.device.manufacturer)
+                            ? `${s.device.manufacturer} ${s.device.model || ''}`.trim()
+                            : 'unknown',
+                    }));
                 }
             } catch (err) {
                 console.error('Error fetching /api/v3/sessions:', err);
