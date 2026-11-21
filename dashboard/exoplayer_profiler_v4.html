@@ -31,6 +31,12 @@ html,body{background:var(--bg);color:var(--text);font-family:'SF Pro Display','S
 .ff-active-badge{background:#58a6ff;color:#0d1117;font-size:0.6rem;font-weight:800;border-radius:6px;padding:1px 6px;margin-left:6px}
 .ff-row{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:0.7rem}
 .ff-row:last-child{border-bottom:none}
+.ff-probe-line{margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:0.66rem}
+.ff-probe-btn{background:#21262d;color:#58a6ff;border:1px solid #30363d;border-radius:6px;padding:2px 8px;font-size:0.66rem;cursor:pointer}
+.ff-probe-btn:hover{border-color:#58a6ff}
+.ff-probe-msg{color:#6e7681}
+.ff-probe-ok{color:#7ee787}
+.ff-probe-err{color:#f78166;word-break:break-word}
 .ff-k{flex:0;color:#8b949e}
 .ff-v{flex:1;text-align:right;color:#c9d1d9;word-break:break-all}
 
@@ -845,7 +851,7 @@ function v3Translate(rawEvents){
         uri:d.uriRedacted, uriHash:d.uriHash,
         bytesLoaded:Number(d.bytesLoaded)>0?Number(d.bytesLoaded):0,
         loadDurationMs:Number(d.loadDurationMs)>0?Number(d.loadDurationMs):0,
-        requestStartMs:d.requestStartMs, chunkId:d.chunkId,
+        requestStartMs:d.requestStartMs, chunkId:d.chunkId, trackFormatId:d.trackFormatId,
         mediaStartTimeMs:d.mediaStartMs, mediaEndTimeMs:d.mediaEndMs,
         outcome:d.outcome||'COMPLETED',
         error:d.errorMessage||d.error||null,
@@ -1204,6 +1210,122 @@ function updateTrackInfoPanel(quality){
   card.addEventListener('mouseenter',()=>{clearTimeout(popTimer);if(popPinned&&activePopType==='tracks')return;popPinned=false;showKpiPop(card,renderTracksPopover());attachPopHandlers('tracks');activePopType='tracks';});
   card.addEventListener('mouseleave',()=>{if(!popPinned)popTimer=setTimeout(closeKpiPop,350);});
 }
+/* ── Fetch more info: init segment → /api/ffprobe → track fields ── */
+function probeSessionId(){return (S.raw&&((S.raw.session&&S.raw.session.id)||S.raw.sessionId))||null;}
+function probeState(tt,key){return (S.probed&&S.probed[tt+'|'+key])||null;}
+function probeTrackType(v){return v==='VIDEO'?2:v==='AUDIO'?1:v==='TEXT'?3:Number(v);}
+/* newest init segment (or media segment as fallback) recorded for this track's format */
+function pickProbeChunk(tt,tr){
+  if(tr.id==null||tr.id==='')return null;
+  let best=null,bestInit=false;
+  for(const l of S.loads||[]){
+    if(l.chunkId==null||probeTrackType(l.trackType)!==tt||l.trackFormatId!==tr.id)continue;
+    const dt=String(l.dataType||'').toLowerCase();
+    const init=dt==='media_initialization'||dt==='init';
+    if(!init&&dt!=='media')continue;
+    if(!best||(init&&!bestInit)||(init===bestInit&&Number(l.chunkId)>Number(best.chunkId))){best=l;bestInit=init;}
+  }
+  return best?{chunkId:Number(best.chunkId)}:null;
+}
+function mergeProbe(tt,key,tr){
+  const p=probeState(tt,key);
+  if(!p||p.status!=='ok'||!p.fields)return tr;
+  const out={...tr};
+  /* fill only what the SDK did not report, so SDK values win where both exist */
+  for(const[k,v] of Object.entries(p.fields)){if(out[k]==null||out[k]===''||out[k]===0||out[k]===false)out[k]=v;}
+  return out;
+}
+function parseFrameRate(text){
+  const m=String(text||'').match(/^(\d+)\/(\d+)$/);
+  if(m&&+m[2]>0)return +m[1]/+m[2];
+  const n=parseFloat(text);return n>0?n:0;
+}
+/* ffprobe -show_streams / -show_format → the field names the track popover reads */
+function probeToTrackFields(tt,r){
+  const streams=Array.isArray(r.streams)?r.streams:[];
+  const want=tt===2?'video':tt===1?'audio':'';
+  const s=streams.find(x=>x&&x.codec_type===want)||{};
+  const fmt=r.format||{};
+  const f={};
+  const put=(k,v)=>{if(v!=null&&v!=='')f[k]=v;};
+  put('profile',s.profile);
+  put('level',s.level);
+  if(s.codec_tag_string&&!/^\[/.test(s.codec_tag_string))put('fourcc',s.codec_tag_string);
+  put('pixFmt',s.pix_fmt);
+  put('lang',s.tags&&s.tags.language);
+  const bps=Number(s.bit_rate||fmt.bit_rate||0);
+  if(bps>0)f.kbps=Math.round(bps/1000);
+  if(s.width){f.w=s.width;f.contentW=s.width;}
+  if(s.height){f.h=s.height;f.contentH=s.height;}
+  const fps=parseFrameRate(s.avg_frame_rate||s.r_frame_rate);
+  if(fps>0)f.fps=Math.round(fps*100)/100;
+  const rot=(s.side_data_list||[]).find(d=>d&&d.rotation!=null);
+  const rotate=rot?rot.rotation:(s.tags&&s.tags.rotate);
+  if(rotate!=null&&rotate!=='')f.rotation=Math.abs(Number(rotate))%360;
+  if(s.sample_rate)f.sampleRate=Number(s.sample_rate);
+  if(s.channels)f.channels=Number(s.channels);
+  put('channelType',s.channel_layout);
+  put('pcmEncoding',s.sample_fmt);
+  put('colorSpace',s.color_space);
+  put('colorRange',s.color_range);
+  put('colorPrimaries',s.color_primaries);
+  if(s.color_transfer){
+    const tf={smpte2084:'PQ','arib-std-b67':'HLG'};
+    f.colorTransfer=tf[s.color_transfer]||s.color_transfer;
+    if(tf[s.color_transfer])f.hdr=true;
+  }
+  const bits=Number(s.bits_per_raw_sample||0);
+  if(bits>0){f.lumaBitdepth=bits;f.chromaBitdepth=bits;}
+  return f;
+}
+function probeControlHtml(tt,key,chunk){
+  const p=probeState(tt,key);
+  const attrs=`class="ff-probe-btn" data-probe-tt="${tt}" data-probe-key="${esc(key)}"`;
+  if(p&&p.status==='loading')return `<span class="ff-probe-msg">fetching init segment…</span>`;
+  if(p&&p.status==='ok'){
+    return `<span class="ff-probe-ok">✓ ffprobe · chunk #${esc(p.chunkId)}${p.encrypted?' · encrypted, stream details unavailable':''}</span>`+
+      (chunk?`<button ${attrs} data-probe-chunk="${chunk.chunkId}">refetch</button>`:'');
+  }
+  if(p&&p.status==='error'){
+    return `<span class="ff-probe-err">${esc(p.msg)}</span>`+(chunk?`<button ${attrs} data-probe-chunk="${chunk.chunkId}">retry</button>`:'');
+  }
+  if(!chunk)return `<span class="ff-probe-msg">no segment recorded for this track</span>`;
+  return `<button ${attrs} data-probe-chunk="${chunk.chunkId}">Fetch more info</button>`;
+}
+function refreshTracksPop(){
+  const card=document.getElementById('kpi-tracks');
+  if(card&&activePopType==='tracks'&&kpiPopEl&&kpiPopEl.style.display!=='none'){showKpiPop(card,renderTracksPopover());attachPopHandlers('tracks');}
+}
+async function fetchTrackInfo(tt,key,chunkId){
+  const pk=tt+'|'+key;
+  S.probed=S.probed||{};
+  popPinned=true; /* keep the popover open while the fetch runs and shows its result */
+  const sid=probeSessionId();
+  if(!sid){S.probed[pk]={status:'error',chunkId,msg:'Session id unknown. Open this session from the bridge dashboard.'};return refreshTracksPop();}
+  S.probed[pk]={status:'loading',chunkId};
+  refreshTracksPop();
+  try{
+    const resp=await fetch('/api/ffprobe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:sid,chunkIds:[Number(chunkId)]})});
+    const body=await resp.json().catch(()=>null);
+    if(!body)throw new Error('Needs the live bridge. Open this dashboard from the bridge (port 9091).');
+    if(body.status!=='ok')throw new Error(body.message||('HTTP '+resp.status));
+    const r=(body.results||[])[0];
+    if(!r||!r.ok)throw new Error((r&&r.error)||'ffprobe failed');
+    S.probed[pk]={status:'ok',chunkId:Number(chunkId),encrypted:!!r.encrypted,fields:probeToTrackFields(tt,r)};
+  }catch(err){
+    S.probed[pk]={status:'error',chunkId,msg:String(err&&err.message||err)};
+  }
+  refreshTracksPop();
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('.ff-probe-btn');
+  if(!b)return;
+  /* the popover re-renders synchronously, detaching this button; stop the page's click-outside
+     handler from reading that as a click outside the popover and closing it */
+  e.stopImmediatePropagation();
+  fetchTrackInfo(Number(b.dataset.probeTt),b.dataset.probeKey,b.dataset.probeChunk);
+});
+
 function renderTracksPopover(){
   const avail=S.availableTracks||{1:[],2:[],3:[],4:[]};
   const hasAvail=S.hasAvailableTracks;
@@ -1235,8 +1357,10 @@ function renderTracksPopover(){
     html+=`<div class="ff-section" style="margin-bottom:10px">
       <div style="font-size:0.7rem;font-weight:700;color:${meta.color};letter-spacing:0.06em;margin-bottom:6px">${meta.name} TRACKS</div>
       <div class="ff-grid">`;
-    for(const tr of deduped){
-      const key=tr.id||((tr.codecs||'')+'|'+(tr.lang||tr.language||'')+'|'+Math.round(tr.kbps||tr.bitrate||0));
+    for(const tr0 of deduped){
+      const key=tr0.id||((tr0.codecs||'')+'|'+(tr0.lang||tr0.language||'')+'|'+Math.round(tr0.kbps||tr0.bitrate||0));
+      const probeChunk=pickProbeChunk(tt,tr0);
+      const tr=mergeProbe(tt,key,tr0);
       /* fall back to quality history sel if track object has none */
       const histSel=hist.find(h=>{const hk=h.id||((h.codecs||'')+'|'+(h.lang||h.language||'')+'|'+Math.round(h.kbps||h.bitrate||0));return hk===key;})?.sel;
       const trSel=tr.sel!=null?tr.sel:histSel;
@@ -1286,6 +1410,7 @@ function renderTracksPopover(){
       }
       html+=`<div class="ff-card ${isAct?'ff-active':''}">
         <div class="ff-title" style="color:${meta.color};font-weight:700;font-size:0.78rem">${esc(codec||mime||'unknown')}${isAct?' <span class="ff-active-badge">ACTIVE</span>':''}${colorWarn?`<span style="color:#f78166;font-size:0.62rem;margin-left:6px;">${colorWarn}</span>`:''}</div>
+        <div class="ff-probe-line">${probeControlHtml(tt,key,probeChunk)}</div>
         ${ffprobeField('Profile',profile||'—','#79c0ff')}
         ${ffprobeField('Level',level||'—','#79c0ff')}
         ${ffprobeField('FourCC',fourcc||'—','#8b949e')}
@@ -1863,6 +1988,7 @@ function analyse(raw){
         outcome:d.outcome||'COMPLETED',
         error:d.error||d.errorMessage||null,
         chunkId:d.chunkId,
+        trackFormatId:d.trackFormatId,
         fromChunk:d.requestStartMs!=null
       });
     }
@@ -1899,6 +2025,7 @@ function analyse(raw){
         lane:lane<0?LANE_DEFS.length-1:lane,
         retried:false,
         chunkId:cd.chunkId,
+        trackFormatId:cd.trackFormatId,
         outcome:cd.outcome||'COMPLETED',
         error:cd.error||cd.errorMessage||null,
         fromChunk:true
@@ -1967,6 +2094,7 @@ function analyse(raw){
         codecs:d.codecs||'',
         lang:d.language||d.languageCode||'',
         sel:d.selectionReason||d.reason||0,
+        id:d.id||'',
         fps:d.frameRate||0,
         rotation:d.rotationDegrees||0,
         stereoMode:d.stereoMode||0,
@@ -1978,8 +2106,11 @@ function analyse(raw){
         selectionFlags:d.selectionFlags||0,
         sampleDurationUs:d.sampleDurationUs||0,
         colorSpace:ci.colorSpace||ci.space||'',
+        colorRange:ci.colorRange||ci.range||'',
         colorTransfer:ci.colorTransfer||ci.transfer||'',
         colorPrimaries:ci.colorPrimaries||'',
+        lumaBitdepth:ci.lumaBitDepth||ci.lumaBitdepth||'',
+        chromaBitdepth:ci.chromaBitDepth||ci.chromaBitdepth||'',
         matrixCoefficients:ci.matrixCoefficients||'',
         hdr:!!hdr,
         maxCLL:hsi.maxCLL||0,
