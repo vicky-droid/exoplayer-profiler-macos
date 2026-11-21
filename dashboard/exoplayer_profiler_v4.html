@@ -530,7 +530,7 @@ tr:hover td{background:#1a1d24}
     </div>
     <div class="btns">
       <button id="btnBack" title="Back to v4 dashboard">← Dashboard</button>
-      <button id="btnLive" title="Toggle live ADB tail — appends ws://localhost:9090 events and refreshes UI">🔴 Live</button>
+      <button id="btnLive" title="Toggle live tail — appends events from the bridge WebSocket (address from /net-info) and refreshes UI">🔴 Live</button>
       <button id="btnPauseGraph" title="Pause live timeline/graph refresh while analyzing" style="display:none;">⏸ Pause Graph</button>
       <button id="btnSpec" title="How to use ExoPlayer Profiler">📖 How to Use</button>
       <button id="btnReplay" class="primary">▶ Replay</button>
@@ -631,6 +631,7 @@ const CAT_COLORS={app:'#6e7681',sdk:'#58a6ff',network:'#1f6feb',timeline:'#d2992
 const CAT_LABELS={app:'APP',sdk:'SDK',network:'NETWORK',timeline:'TIMELINE',drm:'DRM',tracks:'TRACKS',decoder:'DECODER',renderer:'RENDERER',buffer:'BUFFER',playback:'PLAYBACK',seek:'SEEK',bandwidth:'BANDWIDTH',video:'VIDEO',audio:'AUDIO',drops:'DROPS',underrun:'UNDERRUN',error:'ERROR'};
 const CAT_ORDER=['app','sdk','network','timeline','drm','tracks','decoder','renderer','buffer','playback','seek','bandwidth','video','audio','drops','underrun','error'];
 let netInfo = { local_ip: null, ws_url: 'ws://localhost:9090', http_url: 'http://localhost:9091' };
+let netInfoLoaded = false;
 async function loadNetInfo() {
   try {
     const resp = await fetch('/net-info');
@@ -641,8 +642,21 @@ async function loadNetInfo() {
   } catch (e) {
     console.warn('Failed to fetch /net-info, using defaults');
   }
+  netInfoLoaded = true;
 }
 loadNetInfo();
+/* the live socket address comes from the bridge (LAN or local); the page host is only the fallback */
+function liveWsUrl(){
+  // Opened on this Mac: use the local address. Opened from another device: use the LAN address.
+  const local=location.hostname==='localhost'||location.hostname==='127.0.0.1';
+  const u=netInfo&&(local?(netInfo.ws_local||netInfo.ws_url):netInfo.ws_url);
+  return u||`ws://${location.hostname}:9090`;
+}
+function showFileError(file,reason){
+  const b=$('schemaBanner'),m=$('schemaBannerMsg');
+  if(m)m.textContent=`Could not open ${file}: ${reason}. Pick a session from the dashboard list, or drop a session.json file here.`;
+  if(b)b.style.display='';
+}
 
 /* ═══════════════════════════ SCHEMA NORMALISER ═══════════════════════════ */
 /* Mirrors bridge/schema.py. Detects v3/v2/rich/logcat formats and normalises
@@ -2858,8 +2872,8 @@ const BRAIN_COLORS={preparing:'#8b949e',selecting:'#bc4c8f',drm:'#f78166',buffer
 const BRAIN_LABELS={preparing:'PREPARING',selecting:'SELECTING',drm:'DRM',buffering:'INIT BUFFER',playing:'PLAYING',rebuffer:'REBUFFER',seeking:'SEEKING',paused:'PAUSED',idle:'IDLE'};
 
 /* ═══ TIMELINE: curated tracks (all helpers prefixed tl) ═══ */
-const TL={on:{state:1,stall:1,qual:1,bw:1,seg:1,buf:1,mark:1,seek:1,net:1},detail:false,_ev:null,_n:-1,_nl:-1,_c:null};
-const TL_TRACKS=[['state','Playback state','#3fb950'],['stall','Stalls','#da3633'],['qual','Rendition','#a371f7'],['bw','Bandwidth','#58a6ff'],['seg','Segments','#79c0ff'],['buf','Buffer','#3fb950'],['mark','Markers','#e3b341'],['seek','Seeks','#ff9e64'],['net','Network','#1f6feb']];
+const TL={on:{state:1,stall:1,qual:1,bw:1,seg:1,err:1,buf:1,mark:1,seek:1,net:1},detail:false,_ev:null,_n:-1,_nl:-1,_c:null};
+const TL_TRACKS=[['state','Playback state','#3fb950'],['stall','Stalls','#da3633'],['err','Errors','#ff5252'],['qual','Rendition','#a371f7'],['bw','Bandwidth','#58a6ff'],['seg','Segments','#79c0ff'],['buf','Buffer','#3fb950'],['mark','Markers','#e3b341'],['seek','Seeks','#ff9e64'],['net','Network','#1f6feb']];
 const TL_STATE_COL={playing:'#3fb950',buffering:'#d29922',paused:'#6e7681',ended:'#bc4c8f',idle:'#30363d'};
 const TL_NET_ORDER=['video','audio','manifest','media_initialization','license','other'];
 const TL_NET_NAME={video:'Video',audio:'Audio',manifest:'Manifest',media_initialization:'Init',license:'License',other:'Media'};
@@ -2898,6 +2912,10 @@ function tlCache(){
   c.seeks=seeks.sort((a,b)=>a-b);
   c.sw=(S.markers||[]).filter(m=>m.type==='qswitch'||m.type==='aswitch'||m.type==='tswitch');
   c.bursts=groupDropBursts(c.drops,[...(S.markers||[]).filter(m=>m.type==='qswitch').map(m=>m.t),...qs.slice(1).map(q=>q.t)]);
+  /* error lane: error events and loads that did not complete, each with the index it opens in the drawer */
+  c.errTicks=[];
+  ev.forEach((e,i)=>{if(e.cat==='error')c.errTicks.push({t:e.rel,kind:'event',idx:i})});
+  (S.loads||[]).forEach((l,i)=>{if((l.outcome&&l.outcome!=='COMPLETED')||l.error)c.errTicks.push({t:l.start,kind:'load',idx:i})});
   const lanes={};
   for(const l of S.loads){const k=LANE_DEFS[Math.min(l.lane,LANE_DEFS.length-1)].key;(lanes[k]=lanes[k]||[]).push(l)}
   c.lanes=lanes;
@@ -2909,6 +2927,7 @@ function tlLayout(){
   const add=(key,body,extra)=>{const h=TL_TH+body;rows.push(Object.assign({key,y,h,top:y+TL_TH,body},extra||{}));y+=h+3};
   if(TL.on.state)add('state',16);
   if(TL.on.stall)add('stall',12);
+  if(TL.on.err&&c.errTicks.length)add('err',12);
   if(TL.on.qual)add('qual',34);
   if(TL.on.bw)add('bw',40);
   if(TL.on.seg)add('seg',16);
@@ -3017,6 +3036,14 @@ function tlDraw(ctx,W,H){
         const txt='STALL '+fmtDur(st.end-st.start);ctx.font='8px ui-monospace,monospace';ctx.fillStyle='#fff';ctx.textAlign='left';
         if(w>ctx.measureText(txt).width+18)ctx.fillText(txt,xa+12,top+body/2+0.5);
       }
+    }else if(r.key==='err'){
+      /* errors and failed loads as ticks; the row only appears when there is something to show */
+      for(const k of c.errTicks){
+        const x=xOf(k.t);if(x<-4||x>W+4)continue;
+        ctx.fillStyle='#ff5252';ctx.beginPath();
+        ctx.moveTo(x,top+1);ctx.lineTo(x+4,top+body-1);ctx.lineTo(x-4,top+body-1);ctx.closePath();ctx.fill();
+      }
+      info(c.errTicks.length+' error'+(c.errTicks.length>1?'s':''));
     }else if(r.key==='seg'){
       /* one cell per video segment: red when the download took longer than the media it carries */
       let slow=0,n=0;
@@ -3618,7 +3645,28 @@ function renderHeader(){
     });
     metaHtml += `</select></label>`;
   }
+  /* identity strip: full id with copy, and the header fields that link this session to its build, device and config */
+  const chip=t=>`<span style="font-size:0.68rem;padding:2px 8px;border:1px solid #30363d;border-radius:999px;color:#c9d1d9;white-space:nowrap">${t}</span>`;
+  const idChips=[
+    s.packageName&&s.packageName!=='live-adb'&&s.packageName!=='live-profiler'?chip('package '+escapeHtml(s.packageName)):'',
+    s.media3Version?chip('Media3 '+escapeHtml(s.media3Version)):'',
+    s.config&&s.config.captureLevel?chip('capture '+escapeHtml(s.config.captureLevel)):'',
+    s.device&&s.device.android?chip('Android '+escapeHtml(s.device.android)+(s.device.apiLevel?' · API '+escapeHtml(s.device.apiLevel):'')):'',
+    s.redacted?chip('redacted'):'',
+    s.recovered?chip('recovered'):'',
+    ...Object.entries(s.attributes||{}).map(([k,v])=>chip(escapeHtml(k)+'='+escapeHtml(v)))
+  ].join('');
+  metaHtml += `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+    <code style="font-size:0.7rem;color:#8b949e;word-break:break-all">${escapeHtml(s.id||'')}</code>
+    <button id="copyIdBtn" type="button" style="font-size:0.68rem;padding:2px 8px;border:1px solid #30363d;border-radius:6px;background:#17191e;color:#c9d1d9;cursor:pointer">Copy id</button>
+    ${idChips}
+  </div>`;
   $('meta').innerHTML = metaHtml;
+  const copyBtn = $('copyIdBtn');
+  if (copyBtn) copyBtn.onclick = () => {
+    const done = () => { copyBtn.textContent = 'Copied'; setTimeout(() => { copyBtn.textContent = 'Copy id'; }, 1500); };
+    try { navigator.clipboard.writeText(s.id || '').then(done, () => {}); } catch (e) { /* clipboard unavailable: the id is shown and selectable */ }
+  };
   const sp = $('sessionPicker');
   if (sp) {
     sp.onchange = (e) => {
@@ -4475,6 +4523,12 @@ function onClick(ev){
     if(rowMark){select({type:'startup'});return}
   }
   if(p===tlPanel){
+    const er=tlLayout().rows.find(r=>r.key==='err');
+    if(er&&y>=er.y&&y<=er.y+er.h){
+      let best=null,bd=8;
+      for(const k of tlCache().errTicks){const d=Math.abs(xOf(k.t)-x);if(d<bd){bd=d;best=k}}
+      if(best){select(best.kind==='event'?{type:'event',idx:best.idx}:{type:'load',idx:best.idx});return}
+    }
     const l=tlLoadAt(t,x,y);
     if(l){select({type:'load',idx:S.loads.indexOf(l)});return}
   }
@@ -5259,6 +5313,14 @@ function liveBtnLabel(){
     b.classList.add('on');
     b.style.borderColor='var(--amber)';
     b.style.color='var(--amber)';
+  } else if(LIVE.wsDown){
+    b.textContent='⚠ Live: disconnected, retrying in 3 s';
+    b.style.borderColor='var(--amber)';
+    b.style.color='var(--amber)';
+  } else if(!LIVE.wsOpen){
+    b.textContent='⏳ Live: connecting…';
+    b.style.borderColor='var(--amber)';
+    b.style.color='var(--amber)';
   } else {
     b.textContent=`🟢 Live · ${n} evts`;
     b.classList.add('on');
@@ -5357,10 +5419,12 @@ function setLive(on){
   if(on){
     const connect=()=>{
       if(!LIVE.enabled)return;
+      // wait for /net-info so the socket uses the bridge's address, not the localhost fallback
+      if(!netInfoLoaded){setTimeout(connect,200);return;}
       try{if(LIVE.ws)LIVE.ws.close();}catch(e){}
-      const ws=new WebSocket(`ws://${location.hostname}:9090`);
+      const ws=new WebSocket(liveWsUrl());
       LIVE.ws=ws;
-      ws.onopen=()=>{liveBtnLabel();};
+      ws.onopen=()=>{LIVE.wsDown=false;LIVE.wsOpen=true;liveBtnLabel();};
       ws.onmessage=(ev)=>{
         try{
           // A live session must exist before frames are appended; otherwise S.raw is null and every frame fails.
@@ -5386,6 +5450,7 @@ function setLive(on){
       };
       ws.onclose=()=>{
         autoSaveProfilerSession('ws_disconnect');
+        LIVE.wsDown=true;LIVE.wsOpen=false;liveBtnLabel();
         if(LIVE.enabled)setTimeout(connect,3000);
       };
       ws.onerror=()=>{try{ws.close();}catch(e){}};
@@ -5465,8 +5530,12 @@ try{
     bootstrap(JSON.parse(pending));
     maybeAutoLive();
   }else if(params.get('file')){
-    // Flow 2: v4 dashboard file-list click → ?file=http://localhost:9091/uploads/...
-    fetch(params.get('file')).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(data=>{bootstrap(data);maybeAutoLive();}).catch(err=>{console.error('Failed to load ?file=:',err);});
+    // Flow 2: v4 dashboard file-list click → ?file=/uploads/<name>.json. Only same-origin /uploads/ paths load.
+    const rawFile=params.get('file');
+    let target=null;
+    try{const u=new URL(rawFile,location.href);if(u.origin===location.origin&&u.pathname.startsWith('/uploads/'))target=u.pathname+u.search}catch(e){}
+    if(!target){showFileError(rawFile,'only session files under /uploads/ on this bridge can be opened from a link');}
+    else fetch(target).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(data=>{bootstrap(data);maybeAutoLive();}).catch(err=>{console.error('Failed to load ?file=:',err);showFileError(rawFile,String(err&&err.message||err));});
   }else if(params.get('live')==='1'){
     ensureLiveSession();
     setLive(true);
