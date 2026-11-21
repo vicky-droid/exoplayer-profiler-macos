@@ -2792,9 +2792,8 @@ function drawCursorBand(ctx,W,H){
 function drawStalls(ctx,W,H){
   for(const st of S.stalls){
     const x0=xOf(st.start),x1=xOf(st.end);if(x1<0||x0>W)continue;
-    ctx.fillStyle='rgba(218,54,51,0.10)';ctx.fillRect(Math.max(0,x0),0,Math.min(W,x1)-Math.max(0,x0),H);
-    ctx.fillStyle='rgba(218,54,51,0.5)';
-    for(let x=Math.max(0,x0);x<Math.min(W,x1);x+=6){ctx.fillRect(x,0,2,H)}
+    // A faint tint only: the hatched stripes that used to be drawn here cut across every graph line.
+    ctx.fillStyle='rgba(218,54,51,0.06)';ctx.fillRect(Math.max(0,x0),0,Math.min(W,x1)-Math.max(0,x0),H);
   }
 }
 function drawPlayhead(ctx,W,H){
@@ -2971,23 +2970,8 @@ function tlDraw(ctx,W,H){
   const c=tlCache(),L=tlLayout();
   const lab=(txt,x,y,maxX)=>{const w=ctx.measureText(txt).width;if(x+w<=maxX){ctx.fillText(txt,x,y);return x+w+6}return null};
 
-  // Draw full-height vertical stall bands across all tracks
-  for(const st of S.stalls){
-    const x0=xOf(st.start),x1=xOf(st.end);if(x1<0||x0>W)continue;
-    const xa=Math.max(0,x0),w=Math.max(2,Math.min(W,x1)-xa);
-    ctx.save();
-    ctx.fillStyle='rgba(248,81,73,0.16)';
-    ctx.fillRect(xa,0,w,H);
-    ctx.strokeStyle='rgba(248,81,73,0.55)';
-    ctx.lineWidth=1;
-    ctx.setLineDash([3,3]);
-    ctx.beginPath();
-    ctx.moveTo(xa+0.5,0);ctx.lineTo(xa+0.5,H);
-    ctx.moveTo(xa+w-0.5,0);ctx.lineTo(xa+w-0.5,H);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
+  // Stalls are drawn only in the Stalls row (see the 'stall' branch of the track loop), not as full-height bands
+  // across every track, which hid the bandwidth and network lines underneath.
   for(const r of L.rows){
     ctx.save();
     ctx.fillStyle='rgba(255,255,255,0.02)';ctx.fillRect(0,r.y,W,r.h);
@@ -3022,8 +3006,13 @@ function tlDraw(ctx,W,H){
         const x0=xOf(st.start),x1=xOf(st.end);if(x1<0||x0>W)continue;
         const xa=Math.max(0,x0),w=Math.max(2,Math.min(W,x1)-xa);
         ctx.fillStyle='rgba(218,54,51,0.75)';ctx.fillRect(xa,top,w,body);
+        // A small star marks where the stall starts; the label follows it when the bar is wide enough.
+        const sx=xa+5,sy=top+body/2+0.5,sr=4.5;
+        ctx.beginPath();
+        for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,rr=k%2?sr*0.45:sr;ctx.lineTo(sx+Math.cos(a)*rr,sy+Math.sin(a)*rr)}
+        ctx.closePath();ctx.fillStyle='#ffd166';ctx.fill();
         const txt='STALL '+fmtDur(st.end-st.start);ctx.font='8px ui-monospace,monospace';ctx.fillStyle='#fff';ctx.textAlign='left';
-        if(w>ctx.measureText(txt).width+8)ctx.fillText(txt,xa+4,top+body/2+0.5);
+        if(w>ctx.measureText(txt).width+18)ctx.fillText(txt,xa+12,top+body/2+0.5);
       }
     }else if(r.key==='qual'){
       const qs=c.qs;
